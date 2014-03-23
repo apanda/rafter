@@ -184,9 +184,14 @@ get_term(Peer, Index) ->
 %%====================================================================
 %% gen_server callbacks
 %%====================================================================
-init([Name, #rafter_opts{logdir = Logdir}]) ->
+init([Name, #rafter_opts{logdir = Logdir, clean_start = Clean}]) ->
     LogName = Logdir++"/rafter_"++atom_to_list(Name)++".log",
     MetaName = Logdir++"/rafter_"++atom_to_list(Name)++".meta",
+    case Clean of
+        true -> file:delete(LogName),
+                file:delete(MetaName);
+        false-> ok
+    end,
     {ok, LogFile} = file:open(LogName, [append, read, binary, raw]),
     {ok, #file_info{size=Size}} = file:read_file_info(LogName),
     {ok, Meta} = read_metadata(MetaName, Size),
