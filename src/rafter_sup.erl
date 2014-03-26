@@ -24,7 +24,9 @@ start_link() ->
 -spec start_peer(atom() | {atom(), atom()}, #rafter_opts{}) ->
     {'error',_} | {'ok','undefined' | pid()} | {'ok','undefined' | pid(),_}.
 start_peer(Me, Opts) when is_atom(Me) ->
+    io:format("Received start peer call~n"), 
     SupName = consensus_sup(Me),
+    io:format("Sup Name ~p~n", [SupName]), 
     start_child(SupName, Me, Opts);
 start_peer(Me, Opts) ->
     {Name, _Node} = Me,
@@ -57,7 +59,9 @@ start_child(SupName, Me, Opts) ->
     ConsensusSup= {SupName,
         {rafter_consensus_sup, start_link, [Me, Opts]},
         permanent, 5000, supervisor, [rafter_consensus_sup]},
-    supervisor:start_child(?MODULE, ConsensusSup).
+    io:format("Start child ~p. Calling supervisor:start_child~n", [SupName]),
+    supervisor:start_child(?MODULE, ConsensusSup),
+    io:format("Done start child ~p. Calling supervisor:start_child~n", [SupName]).
 
 stop_child(ChildId) ->
     ok = supervisor:terminate_child(?MODULE, ChildId),

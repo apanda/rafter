@@ -81,8 +81,8 @@ init([Me, #rafter_opts{state_machine=StateMachine}]) ->
     {ok, follower, NewState}.
 
 format_status(_, [_, State]) ->
-    Data = lager:pr(State, ?MODULE),
-    [{data, [{"StateData", Data}]}].
+    %Data = lager:pr(State, ?MODULE),
+    [{data, [{"StateData", State}]}].
 
 handle_event(stop, _, State) ->
     {stop, normal, State};
