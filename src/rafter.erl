@@ -74,21 +74,9 @@ start_cluster() ->
     Leader = get_leader(peer2),
     op(Leader, {new, food}).
 
-%kill_app(App, {ok, Pid}) ->
-    %App:stop([]),
-    %exit(Pid, kill);
-%kill_app(App, {ok, Pid, State}) ->
-    %App:stop(State),
-    %exit(Pid, kill);
-%kill_app(_App, _) ->
-    %ok.
-
 start_concuerror_cluster() ->
     io:format("start_concuerror_cluster Starting concuerror cluster~n"),
-    %_GrRet = gr_app:start(normal, []),
-    %_LgrRet = lager_app:start(normal, []),
     _RftrRet = rafter_app:start(normal, []),
-    %{ok, _Started} = application:ensure_all_started(rafter),
     Opts = #rafter_opts{state_machine=rafter_backend_echo, logdir="./log", clean_start=true},
     Peers = [peer1, peer2, peer3],
     io:format("start_concuerror_cluster Starting peers~n"),
@@ -102,9 +90,6 @@ start_concuerror_cluster() ->
     io:format("start_concuerror_cluster Done exploring, stopped peers, killing peers~n"),
     stop_peers(Peers),
     io:format("start_concuerror_cluster Done exploring, stopped peers, killing things~n"),
-    %kill_app(rafter_app, RftrRet),
-    %kill_app(lager_app, LgrRet),
-    %kill_app(gr_app, GrRet),
     io:format("start_concuerror_cluster Concuerror cluster killed~n").
     
 
