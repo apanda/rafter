@@ -20,15 +20,15 @@ stop_node(Peer) ->
 %% @doc Run an operation on the backend state machine.
 %% Note: Peer is just the local node in production.
 op(Peer, Command) ->
-    Id = druuid:v4(),
+    Id = rafter_uuid:v4(),
     rafter_consensus_fsm:op(Peer, {Id, Command}).
 
 read_op(Peer, Command) ->
-    Id = druuid:v4(),
+    Id = rafter_uuid:v4(),
     rafter_consensus_fsm:read_op(Peer, {Id, Command}).
 
 set_config(Peer, NewServers) ->
-    Id = druuid:v4(),
+    Id = rafter_uuid:v4(),
     rafter_consensus_fsm:set_config(Peer, {Id, NewServers}).
 
 -spec get_leader(peer()) -> peer() | undefined.
@@ -74,33 +74,35 @@ start_cluster() ->
     Leader = get_leader(peer2),
     op(Leader, {new, food}).
 
-kill_app(App, {ok, Pid}) ->
-    App:stop([]),
-    exit(Pid, kill);
-kill_app(App, {ok, Pid, State}) ->
-    App:stop(State),
-    exit(Pid, kill);
-kill_app(_App, _) ->
-    ok.
+%kill_app(App, {ok, Pid}) ->
+    %App:stop([]),
+    %exit(Pid, kill);
+%kill_app(App, {ok, Pid, State}) ->
+    %App:stop(State),
+    %exit(Pid, kill);
+%kill_app(_App, _) ->
+    %ok.
 
 start_concuerror_cluster() ->
     io:format("start_concuerror_cluster Starting concuerror cluster~n"),
     %_GrRet = gr_app:start(normal, []),
     %_LgrRet = lager_app:start(normal, []),
-    RftrRet = rafter_app:start(normal, []),
+    _RftrRet = rafter_app:start(normal, []),
     %{ok, _Started} = application:ensure_all_started(rafter),
     Opts = #rafter_opts{state_machine=rafter_backend_echo, logdir="./log", clean_start=true},
-    Peers = [peer1, peer2, peer3, peer4, peer5],
+    Peers = [peer1, peer2, peer3],
     io:format("start_concuerror_cluster Starting peers~n"),
     start_peers(Peers, Opts),
     io:format("start_concuerror_cluster Started all peers~n"),
     set_config(peer1, Peers),
+    io:format("start_concuerror_cluster Set configuration ~n"),
     Leader = get_leader(peer2),
+    io:format("start_concuerror_cluster Get leader ~n"),
     op(Leader, {new, food}),
     io:format("start_concuerror_cluster Done exploring, stopped peers, killing peers~n"),
     stop_peers(Peers),
     io:format("start_concuerror_cluster Done exploring, stopped peers, killing things~n"),
-    kill_app(rafter_app, RftrRet),
+    %kill_app(rafter_app, RftrRet),
     %kill_app(lager_app, LgrRet),
     %kill_app(gr_app, GrRet),
     io:format("start_concuerror_cluster Concuerror cluster killed~n").
