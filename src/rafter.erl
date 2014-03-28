@@ -56,7 +56,7 @@ start_peers([], _) ->
     ok.
 
 stop_peers([Peer | Rest]) ->
-    io:format("Stoppin peer ~p~n", [Peer]),
+    io:format("Stopping peer ~p~n", [Peer]),
     rafter_sup:stop_peer(Peer),
     io:format("Stopping peer ~p~n", [Peer]),
     stop_peers(Rest);
@@ -76,19 +76,24 @@ start_cluster() ->
 
 start_concuerror_cluster() ->
     io:format("start_concuerror_cluster Starting concuerror cluster~n"),
-    _RftrRet = rafter_app:start(normal, []),
+    RftrRet = rafter_app:start(normal, []),
     Opts = #rafter_opts{state_machine=rafter_backend_echo, logdir="./log", clean_start=true},
     Peers = [peer1, peer2, peer3],
-    io:format("start_concuerror_cluster Starting peers~n"),
+    io:format("start_concuerror_cluster Starting peers. Sup ~p~n", [RftrRet]),
     start_peers(Peers, Opts),
     io:format("start_concuerror_cluster Started all peers~n"),
     set_config(peer1, Peers),
     io:format("start_concuerror_cluster Set configuration ~n"),
     Leader = get_leader(peer2),
-    io:format("start_concuerror_cluster Get leader ~n"),
-    op(Leader, {new, food}),
-    io:format("start_concuerror_cluster Done exploring, stopped peers, killing peers~n"),
+    io:format("start_concuerror_cluster Get leader, Leader is ~p ~n", [Leader]),
+    %op(Leader, {new, food}),
+    %io:format("start_concuerror_cluster Done exploring, stopped peers, killing peers~n"),
+    demonitor(RftrRet),
     stop_peers(Peers),
+    case Leader of
+      undefined -> throw(bad_leader);
+      _ -> ok
+    end,
     io:format("start_concuerror_cluster Done exploring, stopped peers, killing things~n"),
     io:format("start_concuerror_cluster Concuerror cluster killed~n").
     

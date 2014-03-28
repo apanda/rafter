@@ -38,7 +38,8 @@ read_op(Peer, Command) ->
     gen_fsm:sync_send_event(Peer, {read_op, Command}).
 
 set_config(Peer, Config) ->
-    gen_fsm:sync_send_event(Peer, {set_config, Config}).
+    gen_fsm:sync_send_event(Peer, {set_config, Config}),
+    io:format("Return from set_config~n").
 
 get_leader(Pid) ->
     gen_fsm:sync_send_all_state_event(Pid, get_leader).
@@ -51,8 +52,8 @@ send(To, Msg) ->
 -spec send_sync(atom(), #request_vote{} | #append_entries{}) ->
     #vote{} | #append_entries_rpy{} | timeout.
 send_sync(To, Msg) ->
-    Timeout=100,
-    gen_fsm:sync_send_event(To, Msg, Timeout).
+    %Timeout=100,
+    gen_fsm:sync_send_event(To, Msg).
 
 %%=============================================================================
 %% gen_fsm callbacks
@@ -196,6 +197,7 @@ follower({set_config, {Id, NewServers}}, From,
             %% so that the entry we log  will have a valid term and can be
             %% committed without a noop.  Note that all other configs must
             %% be blank on the other machines.
+            io:format("~p is now a candidate~n", [Me]),
             {next_state, candidate, NewState};
         false ->
             Error = {error, not_consensus_group_member},
@@ -231,14 +233,16 @@ follower({op, _Command}, _From, #state{leader=Leader}=State) ->
 %% This is the initial election to set the initial config. We did not
 %% get a quorum for our votes, so just reply to the user here and keep trying
 %% until the other nodes come up.
-candidate(timeout, #state{term=1, init_config=[_Id, From]}=S) ->
+candidate(timeout, #state{me = Me, term=1, init_config=[_Id, From]}=S) ->
+    io:format("~p failed to get a Quorum~n", [Me]),
     State0 = reset_timer(election_timeout(), S),
     gen_fsm:reply(From, {error, peers_not_responding}),
     State = State0#state{init_config=no_client},
     {next_state, candidate, State};
 
 %% The election timeout has elapsed so start an election
-candidate(timeout, State) ->
+candidate(timeout, #state{me = Me} = State) ->
+    io:format("~p starts election~n", [Me]),
     NewState = become_candidate(State),
     {next_state, candidate, NewState};
 
@@ -252,8 +256,9 @@ candidate(timeout, State) ->
 %%
 %% Thank you EQC for finding this one :)
 candidate(#vote{term=VoteTerm, success=false},
-          #state{term=Term, init_config=[_Id, From]}=State)
+          #state{me = Me, term=Term, init_config=[_Id, From]}=State)
          when VoteTerm > Term ->
+    io:format("~p bad config~n", [Me]),
     gen_fsm:reply(From, {error, invalid_initial_config}),
     State2 = State#state{init_config=undefined, config=#config{state=blank}},
     NewState = step_down(VoteTerm, State2),
@@ -281,9 +286,11 @@ candidate(#vote{success=true, from=From}, #state{responses=Responses, me=Me,
     NewResponses = dict:store(From, true, Responses),
     case rafter_config:quorum(Me, Config, NewResponses) of
         true ->
+            io:format("~p elected leader~n", [Me]),
             NewState = become_leader(State),
             {next_state, leader, NewState};
         false ->
+            io:format("~p got a vote, not enough to lead~n", [Me]),
             NewState = State#state{responses=NewResponses},
             {next_state, candidate, NewState}
     end.
