@@ -6,7 +6,8 @@
 
 %% API
 -export([start_node/2, stop_node/1, op/2, read_op/2, set_config/2,
-         get_leader/1, get_entry/2, get_last_entry/1]).
+         get_leader/1, get_entry/2, get_last_entry/1, start_multi_test/1,
+         start_named_cluster/1]).
 
 %% Test API
 -export([start_cluster/0, start_test_node/1]).
@@ -50,15 +51,22 @@ get_last_entry(Peer) ->
 %% =============================================
 -define(test_key, x).
 -define(test_val, 55).
+-define(election_times, [1500, 500, 650, 2000]).
 
 start_cluster() ->
     {ok, _Started} = application:ensure_all_started(rafter),
     Opts = #rafter_opts{state_machine=rafter_backend_ets, logdir="./data", 
                         clean_start=true},
-    Peers = [peer1, peer2, peer3, peer4, peer5],
-    [start_node(Me, Opts) || Me <- Peers],
-    set_config(peer1, [peer1, peer2, peer3, peer4, peer5]),
+    Peers = [peer1, peer2, peer3, peer4],
+    %[start_node(Me, Opts) || Me <- Peers],
+    [start_node(Me, Opts#rafter_opts{election_timer = Time}) 
+     || {Me, Time} <- lists:zip(Peers, ?election_times)],
+    set_config(lists:last(Peers), Peers),
     Leader = get_leader(peer1),
+    receive
+      after 700 ->
+        ok
+    end,
     op(Leader, {new, test_table}),
     op(get_leader(Leader), {put, test_table, 
                             ?test_key, ?test_val}),
@@ -75,8 +83,66 @@ start_cluster() ->
     application:stop(rafter), 
     application:stop(lager).
 
+start_named_cluster(Name) ->
+    %{ok, _Started} = application:ensure_all_started(rafter),
+    rafter_app:start(normal, []),
+    LogDir = "./data" ++ "_" ++ Name,
+    Opts = #rafter_opts{state_machine=rafter_backend_ets, logdir= LogDir, 
+                        clean_start=true},
+    case file:make_dir(LogDir) of
+      ok -> ok;
+      {error, eexist} ->
+         ok;
+      {error, Reason} ->
+         throw({error, Reason})
+    end,
+    OPeers = [peer1, peer2, peer3, peer4],
+    Peers = [list_to_atom(atom_to_list(Peer) ++ "_" ++ Name) || Peer <- OPeers],
+    [start_node(Me, Opts#rafter_opts{election_timer = Time}) 
+     || {Me, Time} <- lists:zip(Peers, ?election_times)],
+    set_config(lists:last(Peers), Peers),
+    receive
+      after 700 ->
+        ok
+    end,
+    Leader = get_leader(lists:last(Peers)),
+    io:format("~p says Leader is ~p~n", [lists:last(Peers), Leader]),
+    op(Leader, {new, test_table}),
+    op(get_leader(Leader), {put, test_table, 
+                            ?test_key, ?test_val}),
+    TestVal = read_op(get_leader(Leader), 
+                      {get, test_table, ?test_key}),
+    op(get_leader(Leader), {delete, test_table}),
+    case TestVal =:= {ok, ?test_val} of
+      false -> 
+            io:format("Value does not match, got: ~p, expected~p~n", [TestVal, {ok, ?test_val}]),
+            throw(asserion_fail);
+      _ -> io:format("Passed~n")
+    end,
+    [stop_node(Me) || Me <- Peers],
+    proc_lib:init_ack(ok).
+    %application:stop(lager).
+
 start_test_node(Name) ->
     {ok, _Started} = application:ensure_all_started(rafter),
     Me = {Name, node()},
     Opts = #rafter_opts{state_machine=rafter_backend_ets, logdir="./data"},
     start_node(Me, Opts).
+
+start_multi_test(Count) when is_integer(Count) ->
+  {ok, _Started} = application:ensure_all_started(lager),
+  case Count of
+    0 ->
+      ok;
+    _ -> 
+      [Name] = io_lib:format("~B", [Count]),
+      ok = proc_lib:start(?MODULE, start_named_cluster, [Name]),
+      start_multi_test(Count - 1)
+  end;
+start_multi_test([Count]) ->
+  case string:to_integer(Count) of
+    {error, Reason} ->
+       io:format("Bad argument, need int, given ~p (~p) ~n", [Count, Reason]);
+    {C, _} ->
+       start_multi_test(C)
+    end.

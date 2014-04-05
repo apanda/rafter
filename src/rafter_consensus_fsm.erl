@@ -9,7 +9,7 @@
 -define(CLIENT_TIMEOUT, 2000).
 -define(ELECTION_TIMEOUT_MIN, 500).
 -define(ELECTION_TIMEOUT_MAX, 1000).
--define(HEARTBEAT_TIMEOUT, 25).
+-define(HEARTBEAT_TIMEOUT,600).
 
 %% API
 -export([start_link/3, stop/1, get_leader/1, read_op/2, op/2,
@@ -139,6 +139,7 @@ follower(timeout, #state{config=Config, me=Me, election_timeout=Timeout}=State0)
             NewState = State#state{leader=undefined},
             {next_state, follower, NewState};
         true ->
+            io:format("~p initiating an election~n", [Me]),
             State = become_candidate(State0),
             {next_state, candidate, State}
     end;
@@ -179,6 +180,7 @@ follower(#append_entries{term=Term, from=From, prev_log_index=PrevLogIndex,
             Config = rafter_log:get_config(Me),
             NewRpy = Rpy#append_entries_rpy{success=true, index=CurrentIndex},
             State4 = commit_entries(CommitIndex, State3),
+            io:format("~p thinks leader is ~p~n", [Me, From]),
             State5 = State4#state{leader=From, config=Config},
             {reply, NewRpy, follower, State5}
     end;
@@ -188,6 +190,7 @@ follower(#append_entries{term=Term, from=From, prev_log_index=PrevLogIndex,
 %% entry in every log.
 follower({set_config, {Id, NewServers}}, From,
           #state{me=Me, followers=F, config=#config{state=blank}=C}=State) ->
+    io:format("~p set config~n", [Me]),
     case lists:member(Me, NewServers) of
         true ->
             {Followers, Config} = reconfig(Me, F, C, NewServers, State),
@@ -241,7 +244,8 @@ candidate(timeout, #state{term=1, init_config=[_Id, From],
     {next_state, candidate, State};
 
 %% The election timeout has elapsed so start an election
-candidate(timeout, State) ->
+candidate(timeout, #state{me = Me} = State) ->
+    io:format("~p become candidate, election timeout expired~n", [Me]),
     NewState = become_candidate(State),
     {next_state, candidate, NewState};
 
@@ -273,7 +277,8 @@ candidate(#vote{term=VoteTerm}, #state{term=CurrentTerm}=State)
           when VoteTerm < CurrentTerm ->
     {next_state, candidate, State};
 
-candidate(#vote{success=false, from=From}, #state{responses=Responses}=State) ->
+candidate(#vote{success=false, from=From}, #state{me = Me, responses=Responses}=State) ->
+    io:format("~p receives no vote from ~p~n", [Me, From]),
     NewResponses = dict:store(From, false, Responses),
     NewState = State#state{responses=NewResponses},
     {next_state, candidate, NewState};
@@ -281,6 +286,7 @@ candidate(#vote{success=false, from=From}, #state{responses=Responses}=State) ->
 %% Sweet, someone likes us! Do we have enough votes to get elected?
 candidate(#vote{success=true, from=From}, #state{responses=Responses, me=Me,
                                                  config=Config}=State) ->
+    io:format("~p receives yes vote from ~p~n", [Me, From]),
     NewResponses = dict:store(From, true, Responses),
     case rafter_config:quorum(Me, Config, NewResponses) of
         true ->
@@ -429,8 +435,9 @@ leader(#append_entries{term=Term}, _From, #state{term=CurrentTerm}=State)
     {next_state, follower, NewState};
 
 %% We are out of date. Step down
-leader(#request_vote{term=Term}, _From, #state{term=CurrentTerm}=State)
+leader(#request_vote{term=Term}, _From, #state{term=CurrentTerm, me=Me}=State)
         when Term > CurrentTerm ->
+    io:format("~p stepping down now~n", [Me]),
     NewState = step_down(Term, State),
     {next_state, follower, NewState};
 
@@ -747,7 +754,8 @@ save_greater(Key, Val, Dict, error) ->
     dict:store(Key, Val, Dict).
 
 handle_request_vote(#request_vote{from=CandidateId, term=Term}=RequestVote,
-                    #state{election_timeout = Timeout} = State) ->
+                    #state{election_timeout = Timeout, me = Me} = State) ->
+    io:format("~p Request vote for term ~p from ~p~n", [Me, Term, CandidateId]),
     State2 = set_term(Term, State),
     {ok, Vote} = vote(RequestVote, State2),
     case Vote#vote.success of
@@ -827,6 +835,7 @@ decrement_follower_index(From, Followers) ->
 %%      the asynchrnony of the consensus fsm, while maintaining the rpc
 %%      semantics for the request_vote message as described in the raft paper.
 request_votes(#state{config=Config, term=Term, me=Me}) ->
+    io:format("~p starting election for term ~p~n", [Me, Term]),
     Voters = rafter_config:voters(Me, Config),
     Msg = #request_vote{term=Term,
                         from=Me,
@@ -836,6 +845,7 @@ request_votes(#state{config=Config, term=Term, me=Me}) ->
 
 -spec become_candidate(#state{}) -> #state{}.
 become_candidate(#state{term=CurrentTerm, me=Me, election_timeout=Timeout}=State0) ->
+    io:format("~p become candidate for term ~p~n", [Me, CurrentTerm + 1]),
     State = reset_timer(Timeout, State0),
     State2 = State#state{term=CurrentTerm + 1,
                          responses=dict:new(),
@@ -845,6 +855,7 @@ become_candidate(#state{term=CurrentTerm, me=Me, election_timeout=Timeout}=State
     State3.
 
 become_leader(#state{me=Me, term=Term, init_config=InitConfig}=State) ->
+    io:format("~p now declaring itself a leader~n", [Me]),
     NewState = State#state{leader=Me,
                            responses=dict:new(),
                            followers=initialize_followers(State),
