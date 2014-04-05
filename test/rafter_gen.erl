@@ -38,6 +38,6 @@ consistent_terms() ->
               CurrentTerm >= LastLogTerm).
 
 uuid() ->
-    druuid:v4().
+    uuid:generate().
 
 -endif.

@@ -12,23 +12,25 @@
 -export([start_cluster/0, start_test_node/1]).
 
 start_node(Peer, Opts) ->
+    io:format("Starting peer ~p~n", [Peer]),
     rafter_sup:start_peer(Peer, Opts).
 
 stop_node(Peer) ->
+    io:format("Stopping peer ~p~n", [Peer]),
     rafter_sup:stop_peer(Peer).
 
 %% @doc Run an operation on the backend state machine.
 %% Note: Peer is just the local node in production.
 op(Peer, Command) ->
-    Id = druuid:v4(),
+    Id = uuid:generate(),
     rafter_consensus_fsm:op(Peer, {Id, Command}).
 
 read_op(Peer, Command) ->
-    Id = druuid:v4(),
+    Id = uuid:generate(),
     rafter_consensus_fsm:read_op(Peer, {Id, Command}).
 
 set_config(Peer, NewServers) ->
-    Id = druuid:v4(),
+    Id = uuid:generate(),
     rafter_consensus_fsm:set_config(Peer, {Id, NewServers}).
 
 -spec get_leader(peer()) -> peer() | undefined.
@@ -46,12 +48,32 @@ get_last_entry(Peer) ->
 %% =============================================
 %% Test Functions
 %% =============================================
+-define(test_key, x).
+-define(test_val, 55).
 
 start_cluster() ->
     {ok, _Started} = application:ensure_all_started(rafter),
-    Opts = #rafter_opts{state_machine=rafter_backend_echo, logdir="./log"},
+    Opts = #rafter_opts{state_machine=rafter_backend_ets, logdir="./data", 
+                        clean_start=true},
     Peers = [peer1, peer2, peer3, peer4, peer5],
-    [rafter_sup:start_peer(Me, Opts) || Me <- Peers].
+    [start_node(Me, Opts) || Me <- Peers],
+    set_config(peer1, [peer1, peer2, peer3, peer4, peer5]),
+    Leader = get_leader(peer1),
+    op(Leader, {new, test_table}),
+    op(get_leader(Leader), {put, test_table, 
+                            ?test_key, ?test_val}),
+    TestVal = read_op(get_leader(Leader), 
+                      {get, test_table, ?test_key}),
+    op(get_leader(Leader), {delete, test_table}),
+    case TestVal =:= {ok, ?test_val} of
+      false -> 
+            io:format("Value does not match, got: ~p, expected~p~n", [TestVal, {ok, ?test_val}]),
+            throw(asserion_fail);
+      _ -> io:format("Passed~n")
+    end,
+    [stop_node(Me) || Me <- Peers], 
+    application:stop(rafter), 
+    application:stop(lager).
 
 start_test_node(Name) ->
     {ok, _Started} = application:ensure_all_started(rafter),

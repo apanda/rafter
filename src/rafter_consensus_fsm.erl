@@ -58,8 +58,9 @@ send_sync(To, Msg) ->
 %% gen_fsm callbacks
 %%=============================================================================
 
-init([Me, #rafter_opts{state_machine=StateMachine}]) ->
-    Timer = gen_fsm:send_event_after(election_timeout(), timeout),
+init([Me, #rafter_opts{state_machine=StateMachine, election_timer = Election}]) ->
+    Timeout = election_timeout(Election),
+    Timer = gen_fsm:send_event_after(Timeout, timeout),
     #meta{voted_for=VotedFor, term=Term} = rafter_log:get_metadata(Me),
     BackendState = StateMachine:init(Me),
     State = #state{term=Term,
@@ -69,7 +70,8 @@ init([Me, #rafter_opts{state_machine=StateMachine}]) ->
                    followers=dict:new(),
                    timer=Timer,
                    state_machine=StateMachine,
-                   backend_state=BackendState},
+                   backend_state=BackendState,
+                   election_timeout = Timeout},
     Config = rafter_log:get_config(Me),
     NewState =
         case Config#config.state of
@@ -130,10 +132,10 @@ code_change(_OldVsn, StateName, State, _Extra) ->
 %%=============================================================================
 
 %% Election timeout has expired. Go to candidate state iff we are a voter.
-follower(timeout, #state{config=Config, me=Me}=State0) ->
+follower(timeout, #state{config=Config, me=Me, election_timeout=Timeout}=State0) ->
     case rafter_config:has_vote(Me, Config) of
         false ->
-            State = reset_timer(election_timeout(), State0),
+            State = reset_timer(Timeout, State0),
             NewState = State#state{leader=undefined},
             {next_state, follower, NewState};
         true ->
@@ -159,7 +161,7 @@ follower(#append_entries{term=Term}, _From,
 follower(#append_entries{term=Term, from=From, prev_log_index=PrevLogIndex,
                          entries=Entries, commit_index=CommitIndex,
                          send_clock=Clock}=AppendEntries,
-         _From, #state{me=Me}=State) ->
+         _From, #state{me=Me, election_timeout = Timeout}=State) ->
     State2=set_term(Term, State),
     Rpy = #append_entries_rpy{send_clock=Clock,
                               term=Term,
@@ -167,7 +169,7 @@ follower(#append_entries{term=Term, from=From, prev_log_index=PrevLogIndex,
                               from=Me},
     %% Always reset the election timer here, since the leader is valid,
     %% but may have conflicting data to sync
-    State3 = reset_timer(election_timeout(), State2),
+    State3 = reset_timer(Timeout, State2),
     case consistency_check(AppendEntries, State3) of
         false ->
             {reply, Rpy, follower, State3};
@@ -231,8 +233,9 @@ follower({op, _Command}, _From, #state{leader=Leader}=State) ->
 %% This is the initial election to set the initial config. We did not
 %% get a quorum for our votes, so just reply to the user here and keep trying
 %% until the other nodes come up.
-candidate(timeout, #state{term=1, init_config=[_Id, From]}=S) ->
-    State0 = reset_timer(election_timeout(), S),
+candidate(timeout, #state{term=1, init_config=[_Id, From], 
+                          election_timeout = Timeout}=S) ->
+    State0 = reset_timer(Timeout, S),
     gen_fsm:reply(From, {error, peers_not_responding}),
     State = State0#state{init_config=no_client},
     {next_state, candidate, State};
@@ -717,8 +720,8 @@ safe_to_commit(Index, #state{term=CurrentTerm, me=Me}) ->
 %% We are about to transition to the follower state. Reset the necessary state.
 %% TODO: send errors to any outstanding client read or write requests and cleanup
 %% timers
-step_down(NewTerm, State0) ->
-    State = reset_timer(election_timeout(), State0),
+step_down(NewTerm, #state{election_timeout = Timeout}=State0) ->
+    State = reset_timer(Timeout, State0),
     NewState = State#state{term=NewTerm,
                            responses=dict:new(),
                            leader=undefined},
@@ -744,13 +747,13 @@ save_greater(Key, Val, Dict, error) ->
     dict:store(Key, Val, Dict).
 
 handle_request_vote(#request_vote{from=CandidateId, term=Term}=RequestVote,
-  State) ->
+                    #state{election_timeout = Timeout} = State) ->
     State2 = set_term(Term, State),
     {ok, Vote} = vote(RequestVote, State2),
     case Vote#vote.success of
         true ->
             State3 = set_metadata(CandidateId, State2),
-            State4 = reset_timer(election_timeout(), State3),
+            State4 = reset_timer(Timeout, State3),
             {reply, Vote, follower, State4};
         false ->
             {reply, Vote, follower, State2}
@@ -832,8 +835,8 @@ request_votes(#state{config=Config, term=Term, me=Me}) ->
     [rafter_requester:send(Peer, Msg) || Peer <- Voters].
 
 -spec become_candidate(#state{}) -> #state{}.
-become_candidate(#state{term=CurrentTerm, me=Me}=State0) ->
-    State = reset_timer(election_timeout(), State0),
+become_candidate(#state{term=CurrentTerm, me=Me, election_timeout=Timeout}=State0) ->
+    State = reset_timer(Timeout, State0),
     State2 = State#state{term=CurrentTerm + 1,
                          responses=dict:new(),
                          leader=undefined},
@@ -939,8 +942,13 @@ successful_vote(CurrentTerm, Me) ->
 fail_vote(CurrentTerm, Me) ->
     {ok, #vote{term=CurrentTerm, success=false, from=Me}}.
 
-election_timeout() ->
-    crypto:rand_uniform(?ELECTION_TIMEOUT_MIN, ?ELECTION_TIMEOUT_MAX).
+election_timeout(ElectionTimeout) ->
+    case ElectionTimeout of 
+      E when is_integer(E) ->
+        E;
+      _ ->
+        crypto:rand_uniform(?ELECTION_TIMEOUT_MIN, ?ELECTION_TIMEOUT_MAX)
+      end.
 
 heartbeat_timeout() ->
     ?HEARTBEAT_TIMEOUT.

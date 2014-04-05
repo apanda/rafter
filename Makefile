@@ -2,6 +2,8 @@
 
 rafter:
 	./rebar compile
+clean:
+	./rebar clean
 deps:
 	./rebar get-deps
 test:

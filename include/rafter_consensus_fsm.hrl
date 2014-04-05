@@ -14,6 +14,11 @@
     voted_for :: term(),
     commit_index = 0 :: non_neg_integer(),
     init_config :: undefined | list() | complete | no_client,
+    
+    %% [apanda] Random election timeout, I am going to choose this once since:
+    %% - Not doing crypto
+    %% - Repeated numbers as random as any other random source.
+    election_timeout :: integer(),
 
     %% Used for Election and Heartbeat timeouts
     timer :: reference(),
