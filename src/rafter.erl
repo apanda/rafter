@@ -49,7 +49,7 @@ get_last_entry(Peer) ->
 
 start_peers([Peer | Rest], Opts) ->
     io:format("Starting peer ~p~n", [Peer]),
-    rafter_sup:start_peer(Peer, Opts),
+    start_node(Peer, Opts),
     io:format("Started peer ~p~n", [Peer]),
     start_peers(Rest, Opts);
 start_peers([], _) ->
@@ -57,7 +57,7 @@ start_peers([], _) ->
 
 stop_peers([Peer | Rest]) ->
     io:format("Stopping peer ~p~n", [Peer]),
-    rafter_sup:stop_peer(Peer),
+    stop_node(Peer),
     io:format("Stopping peer ~p~n", [Peer]),
     stop_peers(Rest);
 stop_peers([]) ->
@@ -76,10 +76,9 @@ start_cluster() ->
 
 start_concuerror_cluster() ->
     io:format("start_concuerror_cluster Starting concuerror cluster~n"),
-    RftrRet = rafter_app:start(normal, []),
+    {ok, Pid} = rafter_app:start(normal, []),
     Opts = #rafter_opts{state_machine=rafter_backend_echo, logdir="./log", clean_start=true},
     Peers = [peer1, peer2, peer3],
-    io:format("start_concuerror_cluster Starting peers. Sup ~p~n", [RftrRet]),
     start_peers(Peers, Opts),
     io:format("start_concuerror_cluster Started all peers~n"),
     set_config(peer1, Peers),
@@ -88,15 +87,22 @@ start_concuerror_cluster() ->
     io:format("start_concuerror_cluster Get leader, Leader is ~p ~n", [Leader]),
     %op(Leader, {new, food}),
     %io:format("start_concuerror_cluster Done exploring, stopped peers, killing peers~n"),
-    demonitor(RftrRet),
+    %demonitor(RftrRet),
+    unlink(Pid),
+    Mon = monitor(process, Pid),
+    io:format("PID is ~p~n", [Pid]),
+    exit(Pid, kill),
+    receive
+      {'DOWN', Mon, process, Pid, _} ->
+        io:format("start_concuerror_cluster Concuerror cluster killed~n");
+      Msg ->
+        io:format("Some other kind of message ~p~n", [Msg])
+    end,
     stop_peers(Peers),
     case Leader of
       undefined -> throw(bad_leader);
       _ -> ok
-    end,
-    io:format("start_concuerror_cluster Done exploring, stopped peers, killing things~n"),
-    io:format("start_concuerror_cluster Concuerror cluster killed~n").
-    
+    end.
 
 start_test_node(Name) ->
     {ok, _Started} = application:ensure_all_started(rafter),
