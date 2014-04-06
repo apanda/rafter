@@ -9,7 +9,7 @@
 -define(CLIENT_TIMEOUT, 2000).
 -define(ELECTION_TIMEOUT_MIN, 500).
 -define(ELECTION_TIMEOUT_MAX, 1000).
--define(HEARTBEAT_TIMEOUT,600).
+%-define(HEARTBEAT_TIMEOUT,600).
 
 %% API
 -export([start_link/3, stop/1, get_leader/1, read_op/2, op/2,
@@ -58,7 +58,9 @@ send_sync(To, Msg) ->
 %% gen_fsm callbacks
 %%=============================================================================
 
-init([Me, #rafter_opts{state_machine=StateMachine, election_timer = Election}]) ->
+init([Me, #rafter_opts{state_machine=StateMachine,
+                       election_timer = Election,
+                       heartbeat_time = HBTime}]) ->
     Timeout = election_timeout(Election),
     Timer = gen_fsm:send_event_after(Timeout, timeout),
     #meta{voted_for=VotedFor, term=Term} = rafter_log:get_metadata(Me),
@@ -71,7 +73,8 @@ init([Me, #rafter_opts{state_machine=StateMachine, election_timer = Election}]) 
                    timer=Timer,
                    state_machine=StateMachine,
                    backend_state=BackendState,
-                   election_timeout = Timeout},
+                   election_timeout = Timeout,
+                   hb_timeout = HBTime},
     Config = rafter_log:get_config(Me),
     NewState =
         case Config#config.state of
@@ -236,7 +239,7 @@ follower({op, _Command}, _From, #state{leader=Leader}=State) ->
 %% This is the initial election to set the initial config. We did not
 %% get a quorum for our votes, so just reply to the user here and keep trying
 %% until the other nodes come up.
-candidate(timeout, #state{term=1, init_config=[_Id, From], 
+candidate(timeout, #state{term=1, init_config=[_Id, From],
                           election_timeout = Timeout}=S) ->
     State0 = reset_timer(Timeout, S),
     gen_fsm:reply(From, {error, peers_not_responding}),
@@ -353,21 +356,21 @@ leader(timeout, #state{term=Term,
                        config=C}=S) ->
     Entry = #rafter_entry{type=config, term=Term, cmd=C},
     State0 = append(Entry, S),
-    State = reset_timer(heartbeat_timeout(), State0),
+    State = reset_timer(heartbeat_timeout(State0), State0),
     NewState = State#state{init_config=complete},
     {next_state, leader, NewState};
 
 %% We have just been elected leader because of an initial configuration.
 %% Append the initial config and set init_config=complete.
 leader(timeout, #state{term=Term, init_config=[Id, From], config=C}=S) ->
-    State0 = reset_timer(heartbeat_timeout(), S),
+    State0 = reset_timer(heartbeat_timeout(S), S),
     Entry = #rafter_entry{type=config, term=Term, cmd=C},
     State = append(Id, From, Entry, State0, leader),
     NewState = State#state{init_config=complete},
     {next_state, leader, NewState};
 
 leader(timeout, State0) ->
-    State = reset_timer(heartbeat_timeout(), State0),
+    State = reset_timer(heartbeat_timeout(State0), State0),
     NewState = send_append_entries(State),
     {next_state, leader, NewState};
 
@@ -954,15 +957,15 @@ fail_vote(CurrentTerm, Me) ->
     {ok, #vote{term=CurrentTerm, success=false, from=Me}}.
 
 election_timeout(ElectionTimeout) ->
-    case ElectionTimeout of 
+    case ElectionTimeout of
       E when is_integer(E) ->
         E;
       _ ->
         crypto:rand_uniform(?ELECTION_TIMEOUT_MIN, ?ELECTION_TIMEOUT_MAX)
       end.
 
-heartbeat_timeout() ->
-    ?HEARTBEAT_TIMEOUT.
+heartbeat_timeout(#state{hb_timeout = HbTime}) ->
+    HbTime.
 
 -spec reset_timer(pos_integer(), #state{}) -> #state{}.
 reset_timer(Duration, State=#state{timer=Timer}) ->

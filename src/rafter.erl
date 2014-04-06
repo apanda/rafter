@@ -14,8 +14,15 @@
 
 start_node(Peer, Opts) ->
     io:format("Starting peer ~p~n", [Peer]),
-    rafter_sup:start_peer(Peer, Opts).
-
+    try 
+      rafter_sup:start_peer(Peer, Opts)
+    catch
+      exit:Ex -> 
+        io:format("Caught exit :~p in start_node~n", [Ex]),
+        exit(Ex);
+      _:_ ->
+        io:format("Caught somethign else~n")
+    end.
 stop_node(Peer) ->
     io:format("Stopping peer ~p~n", [Peer]),
     rafter_sup:stop_peer(Peer).
@@ -55,11 +62,11 @@ get_last_entry(Peer) ->
 
 start_cluster() ->
     {ok, _Started} = application:ensure_all_started(rafter),
-    Opts = #rafter_opts{state_machine=rafter_backend_ets, logdir="./data", 
+    Opts = #rafter_opts{state_machine=rafter_backend_ets, logdir="./data",
                         clean_start=true},
     Peers = [peer1, peer2, peer3, peer4],
     %[start_node(Me, Opts) || Me <- Peers],
-    [start_node(Me, Opts#rafter_opts{election_timer = Time}) 
+    [start_node(Me, Opts#rafter_opts{election_timer = Time})
      || {Me, Time} <- lists:zip(Peers, ?election_times)],
     set_config(lists:last(Peers), Peers),
     Leader = get_leader(peer1),
@@ -68,27 +75,28 @@ start_cluster() ->
         ok
     end,
     op(Leader, {new, test_table}),
-    op(get_leader(Leader), {put, test_table, 
+    op(get_leader(Leader), {put, test_table,
                             ?test_key, ?test_val}),
-    TestVal = read_op(get_leader(Leader), 
+    TestVal = read_op(get_leader(Leader),
                       {get, test_table, ?test_key}),
     op(get_leader(Leader), {delete, test_table}),
     case TestVal =:= {ok, ?test_val} of
-      false -> 
+      false ->
             io:format("Value does not match, got: ~p, expected~p~n", [TestVal, {ok, ?test_val}]),
             throw(asserion_fail);
       _ -> io:format("Passed~n")
     end,
-    [stop_node(Me) || Me <- Peers], 
-    application:stop(rafter), 
+    [stop_node(Me) || Me <- Peers],
+    application:stop(rafter),
     application:stop(lager).
 
 start_named_cluster(Name) ->
     %{ok, _Started} = application:ensure_all_started(rafter),
-    rafter_app:start(normal, []),
+    {ok, Pid} = rafter_app:start(normal, []),
+    %io:format("rafter_app:start returns~p~n", [Result]),
     LogDir = "./data" ++ "_" ++ Name,
-    Opts = #rafter_opts{state_machine=rafter_backend_ets, logdir= LogDir, 
-                        clean_start=true},
+    Opts = #rafter_opts{state_machine=rafter_backend_ets, logdir= LogDir,
+                        clean_start=true, heartbeat_time = 250},
     case file:make_dir(LogDir) of
       ok -> ok;
       {error, eexist} ->
@@ -98,7 +106,7 @@ start_named_cluster(Name) ->
     end,
     OPeers = [peer1, peer2, peer3, peer4],
     Peers = [list_to_atom(atom_to_list(Peer) ++ "_" ++ Name) || Peer <- OPeers],
-    [start_node(Me, Opts#rafter_opts{election_timer = Time}) 
+    [start_node(Me, Opts#rafter_opts{election_timer = Time})
      || {Me, Time} <- lists:zip(Peers, ?election_times)],
     set_config(lists:last(Peers), Peers),
     receive
@@ -108,18 +116,27 @@ start_named_cluster(Name) ->
     Leader = get_leader(lists:last(Peers)),
     io:format("~p says Leader is ~p~n", [lists:last(Peers), Leader]),
     op(Leader, {new, test_table}),
-    op(get_leader(Leader), {put, test_table, 
+    op(get_leader(Leader), {put, test_table,
                             ?test_key, ?test_val}),
-    TestVal = read_op(get_leader(Leader), 
+    TestVal = read_op(get_leader(Leader),
                       {get, test_table, ?test_key}),
     op(get_leader(Leader), {delete, test_table}),
     case TestVal =:= {ok, ?test_val} of
-      false -> 
+      false ->
             io:format("Value does not match, got: ~p, expected~p~n", [TestVal, {ok, ?test_val}]),
             throw(asserion_fail);
       _ -> io:format("Passed~n")
     end,
     [stop_node(Me) || Me <- Peers],
+    unlink(Pid),
+    Mon = monitor(process, Pid),
+    exit(Pid, kill),
+    receive
+      {'DOWN', Mon, process, _, _}  ->
+        io:format("Message for down~n");
+      Msg ->
+        io:format("Received other message ~p~n", [Msg])
+    end,
     proc_lib:init_ack(ok).
     %application:stop(lager).
 
@@ -134,7 +151,7 @@ start_multi_test(Count) when is_integer(Count) ->
   case Count of
     0 ->
       ok;
-    _ -> 
+    _ ->
       [Name] = io_lib:format("~B", [Count]),
       ok = proc_lib:start(?MODULE, start_named_cluster, [Name]),
       start_multi_test(Count - 1)

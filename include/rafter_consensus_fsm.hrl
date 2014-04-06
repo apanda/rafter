@@ -19,6 +19,9 @@
     %% - Not doing crypto
     %% - Repeated numbers as random as any other random source.
     election_timeout :: integer(),
+    
+    %% [apanda] Parametrized heartbeat timer so easier to test things.
+    hb_timeout :: integer(),
 
     %% Used for Election and Heartbeat timeouts
     timer :: reference(),
