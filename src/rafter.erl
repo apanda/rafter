@@ -87,8 +87,7 @@ start_cluster() ->
       _ -> io:format("Passed~n")
     end,
     [stop_node(Me) || Me <- Peers],
-    application:stop(rafter),
-    application:stop(lager).
+    application:stop(rafter).
 
 start_named_cluster(Name) ->
     %{ok, _Started} = application:ensure_all_started(rafter),
@@ -138,7 +137,6 @@ start_named_cluster(Name) ->
         io:format("Received other message ~p~n", [Msg])
     end,
     proc_lib:init_ack(ok).
-    %application:stop(lager).
 
 start_test_node(Name) ->
     {ok, _Started} = application:ensure_all_started(rafter),
@@ -147,7 +145,6 @@ start_test_node(Name) ->
     start_node(Me, Opts).
 
 start_multi_test(Count) when is_integer(Count) ->
-  {ok, _Started} = application:ensure_all_started(lager),
   case Count of
     0 ->
       ok;

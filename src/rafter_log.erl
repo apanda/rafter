@@ -211,7 +211,8 @@ init([Name, #rafter_opts{logdir = Logdir, clean_start = Clean}]) ->
                 hints=ets:new(HintsTable, ?ETS_OPTS)}}.
 
 format_status(_, [_, State]) ->
-    Data = lager:pr(State, ?MODULE),
+    %Data = lager:pr(State, ?MODULE),
+    Data = io_lib:format("~p", [State]),
     [{data, [{"StateData", Data}]}].
 
 handle_call({append, Entries}, _From, #state{logfile=File}=State) ->
