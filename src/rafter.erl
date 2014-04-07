@@ -7,7 +7,7 @@
 %% API
 -export([start_node/2, stop_node/1, op/2, read_op/2, set_config/2,
          get_leader/1, get_entry/2, get_last_entry/1, start_multi_test/1,
-         start_named_cluster/1, concuerror_cluster/0]).
+         start_named_cluster_multi/1, concuerror_cluster/0]).
 
 %% Test API
 -export([start_cluster/0, start_test_node/1]).
@@ -135,7 +135,9 @@ start_named_cluster(Name) ->
         io:format("Message for down~n");
       Msg ->
         io:format("Received other message ~p~n", [Msg])
-    end,
+    end.
+start_named_cluster_multi(Name) ->
+    start_named_cluster(Name),
     proc_lib:init_ack(ok).
 
 start_test_node(Name) ->
@@ -145,6 +147,7 @@ start_test_node(Name) ->
     start_node(Me, Opts).
 
 concuerror_cluster() ->
+  random:seed(7, 20, 69), % Seed the random number generator
   start_named_cluster("concuerror").
 
 start_multi_test(Count) when is_integer(Count) ->
@@ -153,7 +156,7 @@ start_multi_test(Count) when is_integer(Count) ->
       ok;
     _ ->
       [Name] = io_lib:format("~B", [Count]),
-      ok = proc_lib:start(?MODULE, start_named_cluster, [Name]),
+      ok = proc_lib:start(?MODULE, start_named_cluster_multi, [Name]),
       start_multi_test(Count - 1)
   end;
 start_multi_test([Count]) ->
