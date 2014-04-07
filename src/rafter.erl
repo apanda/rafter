@@ -7,7 +7,7 @@
 %% API
 -export([start_node/2, stop_node/1, op/2, read_op/2, set_config/2,
          get_leader/1, get_entry/2, get_last_entry/1, start_multi_test/1,
-         start_named_cluster/1]).
+         start_named_cluster/1, concuerror_cluster/0]).
 
 %% Test API
 -export([start_cluster/0, start_test_node/1]).
@@ -143,6 +143,9 @@ start_test_node(Name) ->
     Me = {Name, node()},
     Opts = #rafter_opts{state_machine=rafter_backend_ets, logdir="./data"},
     start_node(Me, Opts).
+
+concuerror_cluster() ->
+  start_named_cluster("concuerror").
 
 start_multi_test(Count) when is_integer(Count) ->
   case Count of

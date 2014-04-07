@@ -52,7 +52,7 @@ quorum(Me, Servers, Responses) ->
                                         lists:member(Peer, Servers)],
     case lists:member(Me, Servers) of
         true ->
-            io:format("~p have ~p votes thusfar~n", [Me, length(TrueResponses) + 1]),
+            %io:format("~p have ~p votes thusfar~n", [Me, length(TrueResponses) + 1]),
             length(TrueResponses) + 1 > length(Servers)/2;
         false ->
             %% We are about to commit a new configuration that doesn't contain

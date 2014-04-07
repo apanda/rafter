@@ -1,6 +1,7 @@
 -record(client_req, {
     id   :: binary(),
-    timer :: timer:tref(),
+    %timer :: timer:tref(),
+    timer :: pid(),
     from :: term(),
     index :: non_neg_integer(),
     term :: non_neg_integer(),
