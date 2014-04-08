@@ -93,7 +93,7 @@ start_named_cluster(Name) ->
     %{ok, _Started} = application:ensure_all_started(rafter),
     {ok, Pid} = rafter_app:start(normal, []),
     %io:format("rafter_app:start returns~p~n", [Result]),
-    Opts = #rafter_opts{state_machine=rafter_backend_ets,
+    Opts = #rafter_opts{state_machine=rafter_backend_dict,
                         clean_start=true, heartbeat_time = 250, log_service=rafter_nodisk_log},
     OPeers = [peer1, peer2, peer3, peer4],
     Peers = [list_to_atom(atom_to_list(Peer) ++ "_" ++ Name) || Peer <- OPeers],
@@ -106,12 +106,8 @@ start_named_cluster(Name) ->
     end,
     Leader = get_leader(lists:last(Peers)),
     io:format("~p says Leader is ~p~n", [lists:last(Peers), Leader]),
-    op(Leader, {new, test_table}),
-    op(get_leader(Leader), {put, test_table,
-                            ?test_key, ?test_val}),
-    TestVal = read_op(get_leader(Leader),
-                      {get, test_table, ?test_key}),
-    op(get_leader(Leader), {delete, test_table}),
+    op(get_leader(Leader), {?test_key, ?test_val}),
+    TestVal = read_op(get_leader(Leader), ?test_key),
     case TestVal =:= {ok, ?test_val} of
       false ->
             io:format("Value does not match, got: ~p, expected~p~n", [TestVal, {ok, ?test_val}]),
