@@ -2,6 +2,8 @@
 
 -behaviour(supervisor).
 
+-include("rafter_opts.hrl").
+
 %% API
 -export([start_link/2]).
 
@@ -16,10 +18,10 @@ start_link(Me, Opts) ->
     SupName = name(Name, "sup"),
     start_link(Name, SupName, Me, Opts).
 
-init([NameAtom, Me, Opts]) ->
+init([NameAtom, Me, #rafter_opts{log_service = Log} = Opts]) ->
     LogServer = { rafter_log,
-                 {rafter_log, start_link, [NameAtom, Opts]},
-                 permanent, 5000, worker, [rafter_log]},
+                 {Log, start_link, [NameAtom, Opts]},
+                 permanent, 5000, worker, [Log]},
 
     ConsensusFsm = { rafter_consensus_fsm,
                     {rafter_consensus_fsm, start_link, [NameAtom, Me, Opts]},

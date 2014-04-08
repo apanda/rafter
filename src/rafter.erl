@@ -93,23 +93,15 @@ start_named_cluster(Name) ->
     %{ok, _Started} = application:ensure_all_started(rafter),
     {ok, Pid} = rafter_app:start(normal, []),
     %io:format("rafter_app:start returns~p~n", [Result]),
-    LogDir = "./data" ++ "_" ++ Name,
-    Opts = #rafter_opts{state_machine=rafter_backend_ets, logdir= LogDir,
-                        clean_start=true, heartbeat_time = 250},
-    case file:make_dir(LogDir) of
-      ok -> ok;
-      {error, eexist} ->
-         ok;
-      {error, Reason} ->
-         throw({error, Reason})
-    end,
+    Opts = #rafter_opts{state_machine=rafter_backend_ets,
+                        clean_start=true, heartbeat_time = 250, log_service=rafter_nodisk_log},
     OPeers = [peer1, peer2, peer3, peer4],
     Peers = [list_to_atom(atom_to_list(Peer) ++ "_" ++ Name) || Peer <- OPeers],
     [start_node(Me, Opts#rafter_opts{election_timer = Time})
      || {Me, Time} <- lists:zip(Peers, ?election_times)],
     set_config(lists:last(Peers), Peers),
     receive
-      after 700 ->
+      after 300 ->
         ok
     end,
     Leader = get_leader(lists:last(Peers)),
@@ -132,11 +124,14 @@ start_named_cluster(Name) ->
     exit(Pid, kill),
     receive
       {'DOWN', Mon, process, _, _}  ->
-        io:format("Message for down~n");
+        %io:format("Message for down~n");
+        ok;
       Msg ->
         io:format("Received other message ~p~n", [Msg])
     end.
+
 start_named_cluster_multi(Name) ->
+    random:seed(7, 20, 69), % Seed the random number generator
     start_named_cluster(Name),
     proc_lib:init_ack(ok).
 
@@ -155,8 +150,8 @@ start_multi_test(Count) when is_integer(Count) ->
     0 ->
       ok;
     _ ->
-      [Name] = io_lib:format("~B", [Count]),
-      ok = proc_lib:start(?MODULE, start_named_cluster_multi, [Name]),
+      %[Name] = io_lib:format("~B", [Count]),
+      ok = proc_lib:start(?MODULE, start_named_cluster_multi, ["multi"]),
       start_multi_test(Count - 1)
   end;
 start_multi_test([Count]) ->

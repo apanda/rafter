@@ -2,4 +2,5 @@
                       logdir :: string(), 
                       clean_start = false :: boolean(), 
                       election_timer :: 'undefined' | integer(),
-                      heartbeat_time  = 25 :: integer()}).
+                      heartbeat_time  = 25 :: integer(),
+                      log_service = rafter_log :: atom()}).

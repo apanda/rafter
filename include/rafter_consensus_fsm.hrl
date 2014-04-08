@@ -54,6 +54,9 @@
     me :: string(),
 
     config :: term(),
+    
+    %% [apanda] Allow pluggable logs
+    log :: atom(), 
 
     %% We allow pluggable backend state machine modules.
     state_machine :: atom(),
