@@ -64,8 +64,8 @@ init([Me, #rafter_opts{state_machine=StateMachine,
                        heartbeat_time = HBTime,
                        log_service = Log}]) ->
     Timeout = election_timeout(Election),
-    %Timer = gen_fsm:send_event_after(Timeout, timeout),
-    Timer = rafter_timer:send_event_after(self(), Timeout, timeout),
+    Timer = gen_fsm:send_event_after(Timeout, timeout),
+    %Timer = rafter_timer:send_event_after(self(), Timeout, timeout),
     #meta{voted_for=VotedFor, term=Term} = Log:get_metadata(Me),
     BackendState = StateMachine:init(Me),
     State = #state{term=Term,
@@ -550,8 +550,8 @@ append(Id, From, Entry,
        #state{me=Me, term=Term, client_reqs=Reqs, log=Log}=State) ->
     %io:format("About to call log to append entry~n"),
     {ok, Index} = Log:append(Me, [Entry]),
-    %{ok, Timer} = timer:send_after(?CLIENT_TIMEOUT, Me, {client_timeout, Id}),
-    {ok, Timer} = rafter_timer:send_after(?CLIENT_TIMEOUT, Me, {client_timeout, Id}),
+    {ok, Timer} = timer:send_after(?CLIENT_TIMEOUT, Me, {client_timeout, Id}),
+    %{ok, Timer} = rafter_timer:send_after(?CLIENT_TIMEOUT, Me, {client_timeout, Id}),
     ClientRequest = #client_req{id=Id,
                                 from=From,
                                 index=Index,
@@ -562,7 +562,9 @@ append(Id, From, Entry,
 setup_read_request(Id, From, Command, #state{send_clock=Clock,
                                              me=Me,
                                              term=Term}=State) ->
-    {ok, Timer} = rafter_timer:send_after(?CLIENT_TIMEOUT, Me,
+    %{ok, Timer} = rafter_timer:send_after(?CLIENT_TIMEOUT, Me,
+        %{client_read_timeout, Clock, Id}),
+    {ok, Timer} = timer:send_after(?CLIENT_TIMEOUT, Me,
         {client_read_timeout, Clock, Id}),
     ReadRequest = #client_req{id=Id,
                               from=From,
@@ -587,8 +589,8 @@ send_client_timeout_reply(#client_req{from=From}) ->
     gen_fsm:reply(From, {error, timeout}).
 
 send_client_reply(#client_req{timer=Timer, from=From}, Result) ->
-    %{ok, cancel} = timer:cancel(Timer),
-    _ = rafter_timer:cancel_timer(Timer),
+    {ok, cancel} = timer:cancel(Timer),
+    %_ = rafter_timer:cancel_timer(Timer),
     gen_fsm:reply(From, Result).
 
 find_client_req(Id, ClientRequests) ->
@@ -1011,8 +1013,10 @@ heartbeat_timeout(#state{hb_timeout = HbTime}) ->
 
 -spec reset_timer(pos_integer(), #state{}) -> #state{}.
 reset_timer(Duration, State=#state{timer=Timer}) ->
-    _ = rafter_timer:cancel_timer(Timer),
-    NewTimer = rafter_timer:send_event_after(self(), Duration, timeout),
+    _ = gen_fsm:cancel_timer(Timer),
+    NewTimer = gen_fsm:send_event_after(Duration, timeout),
+    %_ = rafter_timer:cancel_timer(Timer),
+    %NewTimer = rafter_timer:send_event_after(self(), Duration, timeout),
     State#state{timer=NewTimer}.
 
 %%=============================================================================
