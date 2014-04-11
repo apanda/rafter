@@ -89,6 +89,31 @@ start_cluster() ->
     [stop_node(Me) || Me <- Peers],
     application:stop(rafter).
 
+%-define(stop_manually, true).
+-define(stop_noop, true).
+-ifdef(stop_noop).
+clean_process(_Pid) ->
+    ok.
+-endif.
+-ifdef(stop_manually).
+clean_process(Pid) ->
+  unlink(Pid),
+  Mon = monitor(process, Pid),
+  exit(Pid, kill),
+  receive
+    {'DOWN', Mon, process, _, _}  ->
+      %io:format("Message for down~n");
+      ok;
+    Msg ->
+      io:format("Received other message ~p~n", [Msg])
+  end.
+-endif.
+-ifdef(stop_application).
+clean_process() ->
+  application:stop(rafter),
+  application:unload(rafter).
+-endif.
+
 start_named_cluster(Name) ->
     %{ok, _Started} = application:ensure_all_started(rafter),
     {ok, Pid} = rafter_app:start(normal, []),
@@ -106,25 +131,26 @@ start_named_cluster(Name) ->
     end,
     Leader = get_leader(lists:last(Peers)),
     io:format("~p says Leader is ~p~n", [lists:last(Peers), Leader]),
+    case Leader =:= undefined of
+      true -> 
+        io:format("No leader found,dying here~n"),
+        %[stop_node(Me) || Me <- Peers],
+        clean_process(Pid),
+        throw(asserion_fail);
+      false -> ok
+    end,
     op(get_leader(Leader), {?test_key, ?test_val}),
     TestVal = read_op(get_leader(Leader), ?test_key),
     case TestVal =:= {ok, ?test_val} of
       false ->
+            %[stop_node(Me) || Me <- Peers],
+            clean_process(Pid),
             io:format("Value does not match, got: ~p, expected~p~n", [TestVal, {ok, ?test_val}]),
             throw(asserion_fail);
-      _ -> io:format("Passed~n")
+      _ -> io:format("Passed, expected ~p got ~p ~n", [{ok, ?test_val}, TestVal])
     end,
-    [stop_node(Me) || Me <- Peers],
-    unlink(Pid),
-    Mon = monitor(process, Pid),
-    exit(Pid, kill),
-    receive
-      {'DOWN', Mon, process, _, _}  ->
-        %io:format("Message for down~n");
-        ok;
-      Msg ->
-        io:format("Received other message ~p~n", [Msg])
-    end.
+    %[stop_node(Me) || Me <- Peers],
+    clean_process(Pid).
 
 start_named_cluster_multi(Name) ->
     random:seed(7, 20, 69), % Seed the random number generator
