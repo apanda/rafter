@@ -24,12 +24,12 @@
     timer :: reference(),
 
     %% leader state: contains nextIndex for each peer
-    followers = dict:new() :: dict(),
+    followers = dict:new() :: dict:dict(atom(), non_neg_integer()),
 
     %% Dict keyed by peer id.
     %% contains true as val when candidate
     %% contains match_indexes as val when leader
-    responses = dict:new() :: dict(),
+    responses = dict:new() :: dict:dict(atom(), any()),
 
     %% Logical clock to allow read linearizability
     %% Reset to 0 on leader election.
@@ -37,7 +37,7 @@
 
     %% Keep track of the highest send_clock received from each peer
     %% Reset on leader election
-    send_clock_responses = dict:new() :: dict(),
+    send_clock_responses = dict:new() :: dict:dict(atom(), non_neg_integer()),
 
     %% Outstanding Client Write Requests
     client_reqs = [] :: [#client_req{}],
