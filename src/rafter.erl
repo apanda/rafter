@@ -7,7 +7,8 @@
 %% API
 -export([start_node/2, stop_node/1, op/2, read_op/2, set_config/2,
          get_leader/1, get_entry/2, get_last_entry/1, start_multi_test/1,
-         start_named_cluster_multi/1, concuerror_cluster/0]).
+         start_named_cluster_multi/1, concuerror_cluster/0, concuerror_error_cluster/0,
+         concuerror_min_error_cluster/0]).
 
 %% Test API
 -export([start_cluster/0, start_test_node/1]).
@@ -152,6 +153,135 @@ start_named_cluster(Name) ->
     %[stop_node(Me) || Me <- Peers],
     clean_process(Pid).
 
+
+-define(error_etime, [500, 450]).
+%-define(error_etime, [500]).
+start_named_cluster_error(Name) ->
+    {ok, Pid} = rafter_app:start(normal, []),
+    Opts = #rafter_opts{state_machine=rafter_backend_dict,
+                        clean_start=true, heartbeat_time = 50, log_service=rafter_nodisk_log},
+    OPeers = [pa, pb, pc, pd, pe, pf, pg, ph],
+    OPeerA = [pa, pc, pd, pe],
+    OPeerB = [pb, pa, pf, pg, ph],
+    OPeersToStartFirst = [pa, pb],
+    %OPeersToStartFirst = [pb],
+    OPeersToStartNext = [pc, pg, pd, pe, pf, ph],
+    Peers = [list_to_atom(atom_to_list(Peer) ++ "_" ++ Name) || Peer <- OPeers],
+    PeerA = [list_to_atom(atom_to_list(Peer) ++ "_" ++ Name) || Peer <- OPeerA],
+    PeerB = [list_to_atom(atom_to_list(Peer) ++ "_" ++ Name) || Peer <- OPeerB],
+    PeersToStartFirst = [list_to_atom(atom_to_list(Peer) ++ "_" ++ Name) || Peer <- OPeersToStartFirst],
+    PeersToStartNext= [list_to_atom(atom_to_list(Peer) ++ "_" ++ Name) || Peer <- OPeersToStartNext],
+    [start_node(Me, Opts#rafter_opts{election_timer = Time})
+     || {Me, Time} <- lists:zip(PeersToStartFirst, ?error_etime)],
+    [Pa, Pb] = PeersToStartFirst,
+    %[Pb] = PeersToStartFirst,
+    set_config(Pb, PeerB),
+    set_config(Pa, PeerA),
+    receive
+      after 300 ->
+        ok
+    end,
+    LeaderPa = get_leader(Pa),
+    io:format("~p says Leader is ~p~n", [Pa, LeaderPa]),
+    LeaderPb = get_leader(Pb),
+    io:format("~p says Leader is ~p~n", [Pb, LeaderPb]),
+    [start_node(Me, Opts#rafter_opts{election_timer = 10000})
+     || Me<-PeersToStartNext],
+    receive
+      after 700 ->
+        ok
+    end,
+    LeaderPa1 = get_leader(Pa),
+    io:format("~p says Leader is ~p~n", [Pa, LeaderPa1]),
+    LeaderPb1 = get_leader(Pb),
+    io:format("~p says Leader is ~p~n", [Pb, LeaderPb1]),
+    Pc = list_to_atom(atom_to_list(pc) ++ "_" ++ Name),
+    Pf = list_to_atom(atom_to_list(pf) ++ "_" ++ Name),
+    LeaderPc = get_leader(Pc),
+    io:format("~p says Leader is ~p~n", [Pc, LeaderPc]),
+    LeaderPf = get_leader(Pf),
+    io:format("~p says Leader is ~p~n", [Pf, LeaderPf]),
+    case LeaderPb1 =:= undefined orelse LeaderPb1 =:= LeaderPa1 of
+      true ->
+        io:format("Passed~n"),
+        ok;
+      false ->
+        io:format("Failed found ~p ~p~n", [LeaderPa1, LeaderPb1]),
+        throw(assetion_fail)
+    end,
+    case LeaderPa1 =:= LeaderPc andalso LeaderPb1 =:= LeaderPf of
+      true ->
+        io:format("Passed~n"),
+        ok;
+      false ->
+        io:format("Failed found ~p ~p ~p ~p~n", [LeaderPa1, LeaderPc, LeaderPb1, LeaderPf]),
+        throw(assetion_fail)
+    end,
+    clean_process(Pid).
+
+start_minimized_cluster_error(Name) ->
+    {ok, Pid} = rafter_app:start(normal, []),
+    Opts = #rafter_opts{state_machine=rafter_backend_dict,
+                        clean_start=true, heartbeat_time = 50, log_service=rafter_nodisk_log},
+    OPeers = [pa, pb, pc, pd, pe, pf, pg, ph],
+    OPeerA = [pa, pc, pd, pe],
+    OPeerB = [pb, pa, pf, pg, ph],
+    OPeersToStartFirst = [pa, pb],
+    %OPeersToStartFirst = [pb],
+    OPeersToStartNext = [pc, pg, pd, pe, pf, ph],
+    Peers = [list_to_atom(atom_to_list(Peer) ++ "_" ++ Name) || Peer <- OPeers],
+    PeerA = [list_to_atom(atom_to_list(Peer) ++ "_" ++ Name) || Peer <- OPeerA],
+    PeerB = [list_to_atom(atom_to_list(Peer) ++ "_" ++ Name) || Peer <- OPeerB],
+    PeersToStartFirst = [list_to_atom(atom_to_list(Peer) ++ "_" ++ Name) || Peer <- OPeersToStartFirst],
+    PeersToStartNext= [list_to_atom(atom_to_list(Peer) ++ "_" ++ Name) || Peer <- OPeersToStartNext],
+    [start_node(Me, Opts#rafter_opts{election_timer = Time})
+     || {Me, Time} <- lists:zip(PeersToStartFirst, ?error_etime)],
+    [Pa, Pb] = PeersToStartFirst,
+    %[Pb] = PeersToStartFirst,
+    set_config(Pb, PeerB),
+    %set_config(Pa, PeerA),
+    receive
+      after 300 ->
+        ok
+    end,
+    LeaderPa = get_leader(Pa),
+    io:format("~p says Leader is ~p~n", [Pa, LeaderPa]),
+    LeaderPb = get_leader(Pb),
+    io:format("~p says Leader is ~p~n", [Pb, LeaderPb]),
+    [start_node(Me, Opts#rafter_opts{election_timer = 10000})
+     || Me<-PeersToStartNext],
+    receive
+      after 700 ->
+        ok
+    end,
+    LeaderPa1 = get_leader(Pa),
+    io:format("~p says Leader is ~p~n", [Pa, LeaderPa1]),
+    LeaderPb1 = get_leader(Pb),
+    io:format("~p says Leader is ~p~n", [Pb, LeaderPb1]),
+    case LeaderPb1 =:= undefined orelse LeaderPb1 =:= LeaderPa1 of
+      true ->
+        io:format("Passed~n"),
+        ok;
+      false ->
+        io:format("Failed found ~p ~p~n", [LeaderPa1, LeaderPb1]),
+        throw(assetion_fail)
+    end,
+    %Pc = list_to_atom(atom_to_list(pc) ++ "_" ++ Name),
+    Pf = list_to_atom(atom_to_list(pf) ++ "_" ++ Name),
+    %LeaderPc = get_leader(Pc),
+    %io:format("~p says Leader is ~p~n", [Pc, LeaderPc]),
+    LeaderPf = get_leader(Pf),
+    io:format("~p says Leader is ~p~n", [Pf, LeaderPf]),
+    case LeaderPb1 =:= LeaderPf of
+      true ->
+        io:format("Passed~n"),
+        ok;
+      false ->
+        io:format("Failed found ~p ~p~n", [LeaderPa1, LeaderPf]),
+        throw(assetion_fail)
+    end,
+    clean_process(Pid).
+
 start_named_cluster_multi(Name) ->
     random:seed(7, 20, 69), % Seed the random number generator
     start_named_cluster(Name),
@@ -166,6 +296,14 @@ start_test_node(Name) ->
 concuerror_cluster() ->
   random:seed(7, 20, 69), % Seed the random number generator
   start_named_cluster("concuerror").
+
+concuerror_error_cluster() ->
+  random:seed(7, 20, 69), % Seed the random number generator
+  start_named_cluster_error("concuerror").
+
+concuerror_min_error_cluster() ->
+  random:seed(7, 20, 69), % Seed the random number generator
+  start_minimized_cluster_error("concuerror").
 
 start_multi_test(Count) when is_integer(Count) ->
   case Count of

@@ -38,7 +38,7 @@ read_op(Peer, Command) ->
     gen_fsm:sync_send_event(Peer, {read_op, Command}).
 
 set_config(Peer, Config) ->
-    %io:format("Calling gen_fsm sync function to set_config~n"),
+    io:format("Calling gen_fsm sync function to set_config~n"),
     gen_fsm:sync_send_event(Peer, {set_config, Config}).
 
 get_leader(Pid) ->
@@ -63,6 +63,7 @@ init([Me, #rafter_opts{state_machine=StateMachine,
                        election_timer = Election,
                        heartbeat_time = HBTime,
                        log_service = Log}]) ->
+    io:format("Initing ~p~n", [Me]),
     Timeout = election_timeout(Election),
     %Timer = gen_fsm:send_event_after(Timeout, timeout),
     Timer = rafter_timer:send_event_after(self(), Timeout, timeout),
@@ -147,7 +148,7 @@ follower(timeout, #state{config=Config, me=Me, election_timeout=Timeout}=State0)
             NewState = State#state{leader=undefined},
             {next_state, follower, NewState};
         true ->
-            %io:format("~p initiating an election~n", [Me]),
+            io:format("~p initiating an election~n", [Me]),
             State = become_candidate(State0),
             {next_state, candidate, State}
     end;
@@ -187,7 +188,7 @@ follower(#append_entries{term=Term, from=From, prev_log_index=PrevLogIndex,
             Config = Log:get_config(Me),
             NewRpy = Rpy#append_entries_rpy{success=true, index=CurrentIndex},
             State4 = commit_entries(CommitIndex, State3),
-            %%io:format("~p thinks leader is ~p~n", [Me, From]),
+            io:format("~p thinks leader is ~p~n", [Me, From]),
             State5 = State4#state{leader=From, config=Config},
             {reply, NewRpy, follower, State5}
     end;
@@ -196,11 +197,11 @@ follower(#append_entries{term=Term, from=From, prev_log_index=PrevLogIndex,
 %% (e.g. the log is empty). A config entry must always be the first
 %% entry in every log.
 follower({set_config, {Id, NewServers}}, From,
-          #state{me=Me, followers=F, config=#config{state=blank}=C}=State) ->
-    %io:format("~p set config~n", [Me]),
+          #state{me=Me, election_timeout = Timeout, followers=F, config=#config{state=blank}=C}=State) ->
+    io:format("~p set config~n", [Me]),
     case lists:member(Me, NewServers) of
         true ->
-            %io:format("Calling reconfig~n"),
+            io:format("~p Calling reconfig~n", [Me]),
             {Followers, Config} = reconfig(Me, F, C, NewServers, State),
             %io:format("Back from reconfig~n"),
             NewState = State#state{config=Config, followers=Followers,
@@ -213,9 +214,10 @@ follower({set_config, {Id, NewServers}}, From,
             %% committed without a noop.  Note that all other configs must
             %% be blank on the other machines.
             %io:format("Now a candidate~n"),
-            reset_timer(0, State),
+            reset_timer(Timeout, State),
             {next_state, candidate, NewState};
         false ->
+            io:format("~p Reconfig failing~n", [Me]),
             Error = {error, not_consensus_group_member},
             {reply, Error, follower, State}
     end;
@@ -249,41 +251,50 @@ follower({op, _Command}, _From, #state{leader=Leader}=State) ->
 %% This is the initial election to set the initial config. We did not
 %% get a quorum for our votes, so just reply to the user here and keep trying
 %% until the other nodes come up.
-candidate(timeout, #state{me = _Me, term=1, init_config=[_Id, From],
+candidate(timeout, #state{me = Me, term=1, init_config=[_Id, From],
                           election_timeout = Timeout}=S) ->
-    %io:format("~p election failed because no one wanted to vote~n", [Me]),
+    io:format("~p election failed because no one wanted to vote~n", [Me]),
     State0 = reset_timer(Timeout, S),
     gen_fsm:reply(From, {error, peers_not_responding}),
     State = State0#state{init_config=no_client},
     {next_state, candidate, State};
 
 %% The election timeout has elapsed so start an election
-candidate(timeout, #state{me = _Me} = State) ->
-    %io:format("~p become candidate, election timeout expired~n", [Me]),
+candidate(timeout, #state{me = Me} = State) ->
+    io:format("~p become candidate, election timeout expired~n", [Me]),
     NewState = become_candidate(State),
-    %io:format("~p become candidate, set~n", [Me]),
+    io:format("~p become candidate, set~n", [Me]),
     {next_state, candidate, NewState};
 
-%% This should only happen if two machines are configured differently during
-%% initial configuration such that one configuration includes both proposed leaders
-%% and the other only itself. Additionally, there is not a quorum of either
-%% configuration's servers running.
-%%
-%% (i.e. rafter:set_config(b, [k, b, j]), rafter:set_config(d, [i,k,b,d,o]).
-%%       when only b and d are running.)
-%%
-%% Thank you EQC for finding this one :)
-candidate(#vote{term=VoteTerm, success=false},
-          #state{term=Term, init_config=[_Id, From]}=State)
-         when VoteTerm > Term ->
-    gen_fsm:reply(From, {error, invalid_initial_config}),
-    State2 = State#state{init_config=undefined, config=#config{state=blank}},
-    NewState = step_down(VoteTerm, State2),
-    {next_state, follower, NewState};
+%%% This should only happen if two machines are configured differently during
+%%% initial configuration such that one configuration includes both proposed leaders
+%%% and the other only itself. Additionally, there is not a quorum of either
+%%% configuration's servers running.
+%%%
+%%% (i.e. rafter:set_config(b, [k, b, j]), rafter:set_config(d, [i,k,b,d,o]).
+%%%       when only b and d are running.)
+%%%
+%%% Thank you EQC for finding this one :)
+%candidate(#vote{term=VoteTerm, success=false},
+          %#state{term=Term, init_config=[_Id, From]}=State)
+         %when VoteTerm > Term ->
+    %gen_fsm:reply(From, {error, invalid_initial_config}),
+    %State2 = State#state{init_config=undefined, config=#config{state=blank}},
+    %NewState = step_down(VoteTerm, State2),
+    %{next_state, follower, NewState};
 
 %% We are out of date. Go back to follower state.
-candidate(#vote{term=VoteTerm, success=false}, #state{term=Term}=State)
+candidate(#vote{term=VoteTerm, success=false}, 
+          #state{term=Term, me=Me, init_config=[_Id, From]}=State)
          when VoteTerm > Term ->
+    io:format("~p Stepping down for being out of term, will respond~n", [Me]),
+    gen_fsm:reply(From, {error, invalid_initial_config}),
+    State0 = State#state{init_config=no_client},
+    NewState = step_down(VoteTerm, State0),
+    {next_state, follower, NewState};
+candidate(#vote{term=VoteTerm, success=false}, #state{term=Term, me=Me}=State)
+         when VoteTerm > Term ->
+    io:format("~p Stepping down for being out of term~n", [Me]),
     NewState = step_down(VoteTerm, State),
     {next_state, follower, NewState};
 
@@ -292,36 +303,47 @@ candidate(#vote{term=VoteTerm}, #state{term=CurrentTerm}=State)
           when VoteTerm < CurrentTerm ->
     {next_state, candidate, State};
 
-candidate(#vote{success=false, from=From}, #state{me = _Me, responses=Responses}=State) ->
-    %io:format("~p receives no vote from ~p~n", [Me, From]),
+candidate(#vote{success=false, from=From}, #state{me = Me, responses=Responses}=State) ->
+    io:format("~p receives no vote from ~p~n", [Me, From]),
     NewResponses = dict:store(From, false, Responses),
     NewState = State#state{responses=NewResponses},
     {next_state, candidate, NewState};
 
 %% Sweet, someone likes us! Do we have enough votes to get elected?
 candidate(#vote{success=true, from=From}, #state{responses=Responses, me=Me,
+                                                 election_timeout=Timeout,
                                                  config=Config}=State) ->
-    %io:format("~p receives yes vote from ~p~n", [Me, From]),
+    io:format("~p receives yes vote from ~p~n", [Me, From]),
     NewResponses = dict:store(From, true, Responses),
     case rafter_config:quorum(Me, Config, NewResponses) of
         true ->
             %io:format("Woohoo, I am leader~n"),
             NewState = become_leader(State),
-            reset_timer(0, State),
+            reset_timer(Timeout, State),
             {next_state, leader, NewState};
         false ->
             NewState = State#state{responses=NewResponses},
             {next_state, candidate, NewState}
     end.
 
-candidate({set_config, _}, _From, State) ->
+candidate({set_config, _}, _From, #state{me=Me}=State) ->
+    io:format("~p Cannot set config now~n", [Me]),
     Reply = {error, election_in_progress},
     {reply, Reply, follower, State};
 
 %% A Peer is simultaneously trying to become the leader
 %% If it has a higher term, step down and become follower.
+candidate(#request_vote{term=RequestTerm}=RequestVote, _Fr,
+          #state{term=Term, me=Me, init_config=[_Id, From]}=State0) 
+                    when RequestTerm > Term ->
+    io:format("~p simultaneous election stepping down~n", [Me]),
+    gen_fsm:reply(From, {error, other_election}),
+    State = State0#state{init_config=no_client},
+    NewState = step_down(RequestTerm, State),
+    handle_request_vote(RequestVote, NewState);
 candidate(#request_vote{term=RequestTerm}=RequestVote, _From,
-          #state{term=Term}=State) when RequestTerm > Term ->
+          #state{term=Term, me=Me}=State) when RequestTerm > Term ->
+    io:format("~p simultaneous election stepping down~n", [Me]),
     NewState = step_down(RequestTerm, State),
     handle_request_vote(RequestVote, NewState);
 candidate(#request_vote{}, _From, #state{term=CurrentTerm, me=Me}=State) ->
@@ -367,19 +389,20 @@ candidate({op, _Command}, _From, #state{leader=undefined}=State) ->
 
 leader(timeout, #state{term=Term,
                        init_config=no_client,
+                       election_timeout=Timeout,
                        config=C}=S) ->
     %io:format("Now telling everyone I am the leader~n"),
     Entry = #rafter_entry{type=config, term=Term, cmd=C},
     State0 = append(Entry, S),
-    State = reset_timer(0, State0),
+    State = reset_timer(Timeout, State0),
     NewState = State#state{init_config=complete},
     {next_state, leader, NewState};
 
 %% We have just been elected leader because of an initial configuration.
 %% Append the initial config and set init_config=complete.
-leader(timeout, #state{term=Term, init_config=[Id, From], config=C}=S) ->
+leader(timeout, #state{election_timeout=Timeout,term=Term, init_config=[Id, From], config=C}=S) ->
     %io:format("Now telling everyone I am the leader~n"),
-    State0 = reset_timer(0, S),
+    State0 = reset_timer(Timeout, S),
     Entry = #rafter_entry{type=config, term=Term, cmd=C},
     State = append(Id, From, Entry, State0, leader),
     NewState = State#state{init_config=complete},
@@ -486,9 +509,9 @@ leader({read_op, {Id, Command}}, From, State) ->
     {next_state, leader, NewState};
 
 leader({op, {Id, Command}}, From,
-        #state{term=Term}=State) ->
+        #state{term=Term, election_timeout=Timeout}=State) ->
     %io:format("Received op ~p~n", [{Id, Command}]),
-    State0 = reset_timer(0, State),
+    State0 = reset_timer(Timeout, State),
     Entry = #rafter_entry{type=op, term=Term, cmd=Command},
     %io:format("Created entry ~p~n", [Entry]),
     NewState = append(Id, From, Entry, State0, leader),
