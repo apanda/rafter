@@ -14,18 +14,18 @@
 -export([start_cluster/0, start_test_node/1]).
 
 start_node(Peer, Opts) ->
-    io:format("Starting peer ~p~n", [Peer]),
+    %io:format("Starting peer ~p~n", [Peer]),
     try 
       rafter_sup:start_peer(Peer, Opts)
     catch
       exit:Ex -> 
-        io:format("Caught exit :~p in start_node~n", [Ex]),
-        exit(Ex);
-      _:_ ->
-        io:format("Caught somethign else~n")
+        %io:format("Caught exit :~p in start_node~n", [Ex]),
+        exit(Ex)
+      %_:_ ->
+        %io:format("Caught somethign else~n")
     end.
 stop_node(Peer) ->
-    io:format("Stopping peer ~p~n", [Peer]),
+    %io:format("Stopping peer ~p~n", [Peer]),
     rafter_sup:stop_peer(Peer).
 
 %% @doc Run an operation on the backend state machine.
@@ -84,23 +84,24 @@ start_cluster() ->
     case TestVal =:= {ok, ?test_val} of
       false ->
             io:format("Value does not match, got: ~p, expected~p~n", [TestVal, {ok, ?test_val}]),
-            throw(asserion_fail);
+            throw(assertion_fail);
       _ -> io:format("Passed~n")
     end,
     [stop_node(Me) || Me <- Peers],
     application:stop(rafter).
 
-%-define(stop_manually, true).
--define(stop_noop, true).
+-define(stop_manually, true).
+%-define(stop_noop, true).
 -ifdef(stop_noop).
 clean_process(_Pid) ->
     ok.
 -endif.
 -ifdef(stop_manually).
 clean_process(Pid) ->
+  io:format("Stopping manually~n"),
   unlink(Pid),
   Mon = monitor(process, Pid),
-  exit(Pid, kill),
+  exit(Pid, shutdown),
   receive
     {'DOWN', Mon, process, _, _}  ->
       %io:format("Message for down~n");
@@ -137,7 +138,7 @@ start_named_cluster(Name) ->
         io:format("No leader found,dying here~n"),
         %[stop_node(Me) || Me <- Peers],
         clean_process(Pid),
-        throw(asserion_fail);
+        throw(assertion_fail);
       false -> ok
     end,
     op(get_leader(Leader), {?test_key, ?test_val}),
@@ -147,7 +148,7 @@ start_named_cluster(Name) ->
             %[stop_node(Me) || Me <- Peers],
             clean_process(Pid),
             io:format("Value does not match, got: ~p, expected~p~n", [TestVal, {ok, ?test_val}]),
-            throw(asserion_fail);
+            throw(assertion_fail);
       _ -> io:format("Passed, expected ~p got ~p ~n", [{ok, ?test_val}, TestVal])
     end,
     %[stop_node(Me) || Me <- Peers],
@@ -158,8 +159,6 @@ start_named_cluster(Name) ->
 %-define(error_etime, [500]).
 start_named_cluster_error_large(Name) ->
     {ok, Pid} = rafter_app:start(normal, []),
-    Opts = #rafter_opts{state_machine=rafter_backend_dict,
-                        clean_start=true, heartbeat_time = 50, log_service=rafter_nodisk_log},
     OPeers = [pa, pb, pc, pd, pe, pf, pg, ph, pi, pj1, pj2, pj3, pj4, pj5, pj6, pj7, pj8],
     OPeerA = [pa, pc, pd, pe],
     OPeerB = [pb, pa, pf, pg, ph],
@@ -171,59 +170,70 @@ start_named_cluster_error_large(Name) ->
     PeerB = [list_to_atom(atom_to_list(Peer) ++ "_" ++ Name) || Peer <- OPeerB],
     PeersToStartFirst = [list_to_atom(atom_to_list(Peer) ++ "_" ++ Name) || Peer <- OPeersToStartFirst],
     PeersToStartNext= [list_to_atom(atom_to_list(Peer) ++ "_" ++ Name) || Peer <- OPeersToStartNext],
-    [start_node(Me, Opts#rafter_opts{election_timer = Time})
-     || {Me, Time} <- lists:zip(PeersToStartFirst, ?error_etime)],
-    [Pa, Pb] = PeersToStartFirst,
-    %[Pb] = PeersToStartFirst,
-    set_config(Pb, PeerB),
-    set_config(Pa, PeerA),
-    receive
-      after 300 ->
-        ok
-    end,
-    LeaderPa = get_leader(Pa),
-    %io:format("~p says Leader is ~p~n", [Pa, LeaderPa]),
-    LeaderPb = get_leader(Pb),
-    %io:format("~p says Leader is ~p~n", [Pb, LeaderPb]),
-    [start_node(Me, Opts#rafter_opts{election_timer = 10000})
-     || Me<-PeersToStartNext],
-    receive
-      after 700 ->
-        ok
-    end,
-    LeaderPa1 = get_leader(Pa),
-    %io:format("~p says Leader is ~p~n", [Pa, LeaderPa1]),
-    LeaderPb1 = get_leader(Pb),
-    %io:format("~p says Leader is ~p~n", [Pb, LeaderPb1]),
-    Pc = list_to_atom(atom_to_list(pc) ++ "_" ++ Name),
-    Pf = list_to_atom(atom_to_list(pf) ++ "_" ++ Name),
-    LeaderPc = get_leader(Pc),
-    %io:format("~p says Leader is ~p~n", [Pc, LeaderPc]),
-    LeaderPf = get_leader(Pf),
-    %io:format("~p says Leader is ~p~n", [Pf, LeaderPf]),
-    case LeaderPb1 =:= undefined orelse LeaderPb1 =:= LeaderPa1 of
-      true ->
-        %io:format("Passed~n"),
-        ok;
-      false ->
-        %io:format("Failed found ~p ~p~n", [LeaderPa1, LeaderPb1]),
-        throw(assetion_fail)
-    end,
-    case LeaderPa1 =:= LeaderPc andalso LeaderPb1 =:= LeaderPf of
-      true ->
-        %io:format("Passed found ~p ~p ~p ~p~n", [LeaderPa1, LeaderPc, LeaderPb1, LeaderPf]),
-        ok;
-      false ->
-        %io:format("Failed found ~p ~p ~p ~p~n", [LeaderPa1, LeaderPc, LeaderPb1, LeaderPf]),
-        throw(assetion_fail)
-    end,
-    case LeaderPa1 =:= undefined of
-      %true -> exit(assertion_fail);
-      true -> throw(assertion_fail);
-      false ->
+    AllPeers = [list_to_atom(atom_to_list(Peer) ++ "_" ++ Name) || Peer <- OPeersToStartNext],
+    try
+        Opts = #rafter_opts{state_machine=rafter_backend_dict,
+                            clean_start=true, heartbeat_time = 50, log_service=rafter_nodisk_log},
+        [start_node(Me, Opts#rafter_opts{election_timer = Time})
+         || {Me, Time} <- lists:zip(PeersToStartFirst, ?error_etime)],
+        [Pa, Pb] = PeersToStartFirst,
+        %[Pb] = PeersToStartFirst,
+        set_config(Pb, PeerB),
+        set_config(Pa, PeerA),
+        receive
+          after 300 ->
             ok
-    end,
-    clean_process(Pid).
+        end,
+        LeaderPa = get_leader(Pa),
+        %io:format("~p says Leader is ~p~n", [Pa, LeaderPa]),
+        LeaderPb = get_leader(Pb),
+        %io:format("~p says Leader is ~p~n", [Pb, LeaderPb]),
+        [start_node(Me, Opts#rafter_opts{election_timer = 10000})
+         || Me<-PeersToStartNext],
+        receive
+          after 700 ->
+            ok
+        end,
+        LeaderPa1 = get_leader(Pa),
+        %io:format("~p says Leader is ~p~n", [Pa, LeaderPa1]),
+        LeaderPb1 = get_leader(Pb),
+        %io:format("~p says Leader is ~p~n", [Pb, LeaderPb1]),
+        Pc = list_to_atom(atom_to_list(pc) ++ "_" ++ Name),
+        Pf = list_to_atom(atom_to_list(pf) ++ "_" ++ Name),
+        LeaderPc = get_leader(Pc),
+        %io:format("~p says Leader is ~p~n", [Pc, LeaderPc]),
+        LeaderPf = get_leader(Pf),
+        %io:format("~p says Leader is ~p~n", [Pf, LeaderPf]),
+        case LeaderPb1 =:= undefined orelse LeaderPb1 =:= LeaderPa1 of
+          true ->
+            %io:format("Passed~n"),
+            ok;
+          false ->
+            %io:format("Failed found ~p ~p~n", [LeaderPa1, LeaderPb1]),
+            throw(assertion_fail)
+        end,
+        case LeaderPa1 =:= LeaderPc andalso LeaderPb1 =:= LeaderPf of
+          true ->
+            %io:format("Passed found ~p ~p ~p ~p~n", [LeaderPa1, LeaderPc, LeaderPb1, LeaderPf]),
+            ok;
+          false ->
+            %io:format("Failed found ~p ~p ~p ~p~n", [LeaderPa1, LeaderPc, LeaderPb1, LeaderPf]),
+            throw(assertion_fail)
+        end,
+        case LeaderPa1 =:= undefined of
+          %true -> exit(assertion_fail);
+          true -> throw(assertion_fail);
+          false ->
+                ok
+        end
+    catch
+      throw:Term -> throw(Term);
+      exit:Reason-> exit(Reason);
+      error:Reason -> erlang:error(Reason)
+    after 
+      %[stop_node(Me) || Me <- AllPeers],
+      clean_process(Pid)
+    end.
 
 start_named_cluster_error_small(Name) ->
     {ok, Pid} = rafter_app:start(normal, []),

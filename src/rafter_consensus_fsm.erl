@@ -63,10 +63,10 @@ init([Me, #rafter_opts{state_machine=StateMachine,
                        election_timer = Election,
                        heartbeat_time = HBTime,
                        log_service = Log}]) ->
-    io:format("Initing ~p~n", [Me]),
+    %io:format("Initing ~p~n", [Me]),
     Timeout = election_timeout(Election),
     %Timer = gen_fsm:send_event_after(Timeout, timeout),
-    Timer = rafter_timer:send_event_after(self(), Timeout, timeout),
+    rafter_timer_fsm:send_event_after(Me, self(), Timeout, timeout),
     #meta{voted_for=VotedFor, term=Term} = Log:get_metadata(Me),
     BackendState = StateMachine:init(Me),
     State = #state{term=Term,
@@ -74,7 +74,7 @@ init([Me, #rafter_opts{state_machine=StateMachine,
                    me=Me,
                    responses=dict:new(),
                    followers=dict:new(),
-                   timer=Timer,
+                   timer= nil,
                    state_machine=StateMachine,
                    backend_state=BackendState,
                    election_timeout = Timeout,
@@ -148,7 +148,7 @@ follower(timeout, #state{config=Config, me=Me, election_timeout=Timeout}=State0)
             NewState = State#state{leader=undefined},
             {next_state, follower, NewState};
         true ->
-            io:format("~p initiating an election~n", [Me]),
+            %io:format("~p initiating an election~n", [Me]),
             State = become_candidate(State0),
             {next_state, candidate, State}
     end;
@@ -188,7 +188,7 @@ follower(#append_entries{term=Term, from=From, prev_log_index=PrevLogIndex,
             Config = Log:get_config(Me),
             NewRpy = Rpy#append_entries_rpy{success=true, index=CurrentIndex},
             State4 = commit_entries(CommitIndex, State3),
-            io:format("~p thinks leader is ~p~n", [Me, From]),
+            %io:format("~p thinks leader is ~p~n", [Me, From]),
             State5 = State4#state{leader=From, config=Config},
             {reply, NewRpy, follower, State5}
     end;
@@ -198,10 +198,10 @@ follower(#append_entries{term=Term, from=From, prev_log_index=PrevLogIndex,
 %% entry in every log.
 follower({set_config, {Id, NewServers}}, From,
           #state{me=Me, election_timeout = Timeout, followers=F, config=#config{state=blank}=C}=State) ->
-    io:format("~p set config~n", [Me]),
+    %io:format("~p set config~n", [Me]),
     case lists:member(Me, NewServers) of
         true ->
-            io:format("~p Calling reconfig~n", [Me]),
+            %io:format("~p Calling reconfig~n", [Me]),
             {Followers, Config} = reconfig(Me, F, C, NewServers, State),
             %io:format("Back from reconfig~n"),
             NewState = State#state{config=Config, followers=Followers,
@@ -217,7 +217,7 @@ follower({set_config, {Id, NewServers}}, From,
             reset_timer(Timeout, State),
             {next_state, candidate, NewState};
         false ->
-            io:format("~p Reconfig failing~n", [Me]),
+            %io:format("~p Reconfig failing~n", [Me]),
             Error = {error, not_consensus_group_member},
             {reply, Error, follower, State}
     end;
@@ -251,19 +251,19 @@ follower({op, _Command}, _From, #state{leader=Leader}=State) ->
 %% This is the initial election to set the initial config. We did not
 %% get a quorum for our votes, so just reply to the user here and keep trying
 %% until the other nodes come up.
-candidate(timeout, #state{me = Me, term=1, init_config=[_Id, From],
+candidate(timeout, #state{me = _Me, term=1, init_config=[_Id, From],
                           election_timeout = Timeout}=S) ->
-    io:format("~p election failed because no one wanted to vote~n", [Me]),
+    %io:format("~p election failed because no one wanted to vote~n", [Me]),
     State0 = reset_timer(Timeout, S),
     gen_fsm:reply(From, {error, peers_not_responding}),
     State = State0#state{init_config=no_client},
     {next_state, candidate, State};
 
 %% The election timeout has elapsed so start an election
-candidate(timeout, #state{me = Me} = State) ->
-    io:format("~p become candidate, election timeout expired~n", [Me]),
+candidate(timeout, #state{me = _Me} = State) ->
+    %io:format("~p become candidate, election timeout expired~n", [Me]),
     NewState = become_candidate(State),
-    io:format("~p become candidate, set~n", [Me]),
+    %io:format("~p become candidate, set~n", [Me]),
     {next_state, candidate, NewState};
 
 %%% This should only happen if two machines are configured differently during
@@ -285,16 +285,16 @@ candidate(timeout, #state{me = Me} = State) ->
 
 %% We are out of date. Go back to follower state.
 candidate(#vote{term=VoteTerm, success=false}, 
-          #state{term=Term, me=Me, init_config=[_Id, From]}=State)
+          #state{term=Term, me=_Me, init_config=[_Id, From]}=State)
          when VoteTerm > Term ->
-    io:format("~p Stepping down for being out of term, will respond~n", [Me]),
+    %io:format("~p Stepping down for being out of term, will respond~n", [Me]),
     gen_fsm:reply(From, {error, invalid_initial_config}),
     State0 = State#state{init_config=no_client},
     NewState = step_down(VoteTerm, State0),
     {next_state, follower, NewState};
-candidate(#vote{term=VoteTerm, success=false}, #state{term=Term, me=Me}=State)
+candidate(#vote{term=VoteTerm, success=false}, #state{term=Term, me=_Me}=State)
          when VoteTerm > Term ->
-    io:format("~p Stepping down for being out of term~n", [Me]),
+    %io:format("~p Stepping down for being out of term~n", [Me]),
     NewState = step_down(VoteTerm, State),
     {next_state, follower, NewState};
 
@@ -303,8 +303,8 @@ candidate(#vote{term=VoteTerm}, #state{term=CurrentTerm}=State)
           when VoteTerm < CurrentTerm ->
     {next_state, candidate, State};
 
-candidate(#vote{success=false, from=From}, #state{me = Me, responses=Responses}=State) ->
-    io:format("~p receives no vote from ~p~n", [Me, From]),
+candidate(#vote{success=false, from=From}, #state{me = _Me, responses=Responses}=State) ->
+    %io:format("~p receives no vote from ~p~n", [Me, From]),
     NewResponses = dict:store(From, false, Responses),
     NewState = State#state{responses=NewResponses},
     {next_state, candidate, NewState};
@@ -313,7 +313,7 @@ candidate(#vote{success=false, from=From}, #state{me = Me, responses=Responses}=
 candidate(#vote{success=true, from=From}, #state{responses=Responses, me=Me,
                                                  election_timeout=Timeout,
                                                  config=Config}=State) ->
-    io:format("~p receives yes vote from ~p~n", [Me, From]),
+    %io:format("~p receives yes vote from ~p~n", [Me, From]),
     NewResponses = dict:store(From, true, Responses),
     case rafter_config:quorum(Me, Config, NewResponses) of
         true ->
@@ -326,24 +326,24 @@ candidate(#vote{success=true, from=From}, #state{responses=Responses, me=Me,
             {next_state, candidate, NewState}
     end.
 
-candidate({set_config, _}, _From, #state{me=Me}=State) ->
-    io:format("~p Cannot set config now~n", [Me]),
+candidate({set_config, _}, _From, #state{me=_Me}=State) ->
+    %io:format("~p Cannot set config now~n", [Me]),
     Reply = {error, election_in_progress},
     {reply, Reply, follower, State};
 
 %% A Peer is simultaneously trying to become the leader
 %% If it has a higher term, step down and become follower.
 candidate(#request_vote{term=RequestTerm}=RequestVote, _Fr,
-          #state{term=Term, me=Me, init_config=[_Id, From]}=State0) 
+          #state{term=Term, me=_Me, init_config=[_Id, From]}=State0) 
                     when RequestTerm > Term ->
-    io:format("~p simultaneous election stepping down~n", [Me]),
+    %io:format("~p simultaneous election stepping down~n", [Me]),
     gen_fsm:reply(From, {error, other_election}),
     State = State0#state{init_config=no_client},
     NewState = step_down(RequestTerm, State),
     handle_request_vote(RequestVote, NewState);
 candidate(#request_vote{term=RequestTerm}=RequestVote, _From,
-          #state{term=Term, me=Me}=State) when RequestTerm > Term ->
-    io:format("~p simultaneous election stepping down~n", [Me]),
+          #state{term=Term, me=_Me}=State) when RequestTerm > Term ->
+    %io:format("~p simultaneous election stepping down~n", [Me]),
     NewState = step_down(RequestTerm, State),
     handle_request_vote(RequestVote, NewState);
 candidate(#request_vote{}, _From, #state{term=CurrentTerm, me=Me}=State) ->
@@ -574,24 +574,23 @@ append(Id, From, Entry,
     %io:format("About to call log to append entry~n"),
     {ok, Index} = Log:append(Me, [Entry]),
     %{ok, Timer} = timer:send_after(?CLIENT_TIMEOUT, Me, {client_timeout, Id}),
-    {ok, Timer} = rafter_timer:send_after(?CLIENT_TIMEOUT, Me, {client_timeout, Id}),
+    rafter_timer_fsm:send_after(Me, ?CLIENT_TIMEOUT, Me, {client_timeout, Id}),
     ClientRequest = #client_req{id=Id,
                                 from=From,
                                 index=Index,
                                 term=Term,
-                                timer=Timer},
+                                timer=nil},
     State#state{client_reqs=[ClientRequest | Reqs]}.
 
 setup_read_request(Id, From, Command, #state{send_clock=Clock,
                                              me=Me,
                                              term=Term}=State) ->
-    {ok, Timer} = rafter_timer:send_after(?CLIENT_TIMEOUT, Me,
+    rafter_timer_fsm:send_after(Me, ?CLIENT_TIMEOUT, Me,
         {client_read_timeout, Clock, Id}),
     ReadRequest = #client_req{id=Id,
                               from=From,
                               term=Term,
-                              cmd=Command,
-                              timer=Timer},
+                              cmd=Command},
     NewState = save_read_request(ReadRequest, State),
     send_append_entries(NewState).
 
@@ -609,9 +608,9 @@ save_read_request(ReadRequest, #state{send_clock=Clock,
 send_client_timeout_reply(#client_req{from=From}) ->
     gen_fsm:reply(From, {error, timeout}).
 
-send_client_reply(#client_req{timer=Timer, from=From}, Result) ->
+send_client_reply(Me, #client_req{from=From}, Result) ->
     %{ok, cancel} = timer:cancel(Timer),
-    _ = rafter_timer:cancel_timer(Timer),
+    _ = rafter_timer_fsm:cancel_timer(Me),
     gen_fsm:reply(From, Result).
 
 find_client_req(Id, ClientRequests) ->
@@ -712,7 +711,7 @@ stabilize_config(_, State) ->
 maybe_send_client_reply(Index, CliReqs, S, Result) when S#state.leader =:= S#state.me ->
     case find_client_req_by_index(Index, CliReqs) of
         {ok, Req} ->
-            send_client_reply(Req, Result),
+            send_client_reply(S#state.me, Req, Result),
             Reqs = delete_client_req_by_index(Index, CliReqs),
             S#state{client_reqs=Reqs};
         not_found ->
@@ -744,18 +743,19 @@ find_eligible_read_requests(SendClock, #state{read_reqs=Requests}=State) ->
 send_client_read_replies([], State) ->
     State;
 send_client_read_replies(Requests, State=#state{state_machine=StateMachine,
+                                                me=Me,
                                                 backend_state=BackendState}) ->
     NewBackendState =
         lists:foldl(fun({_Clock, ClientReqs}, BeState) ->
-                        read_and_send(ClientReqs, StateMachine, BeState)
+                        read_and_send(Me, ClientReqs, StateMachine, BeState)
                     end, BackendState, Requests),
     State#state{backend_state=NewBackendState}.
 
-read_and_send(ClientRequests, StateMachine, BackendState) ->
+read_and_send(Me, ClientRequests, StateMachine, BackendState) ->
     lists:foldl(fun(Req, Acc) ->
                     {Val, NewAcc} =
                     StateMachine:read(Req#client_req.cmd, Acc),
-                    send_client_reply(Req, Val),
+                    send_client_reply(Me, Req, Val),
                     NewAcc
                 end, BackendState, ClientRequests).
 
@@ -1033,10 +1033,10 @@ heartbeat_timeout(#state{hb_timeout = HbTime}) ->
     HbTime.
 
 -spec reset_timer(pos_integer(), #state{}) -> #state{}.
-reset_timer(Duration, State=#state{timer=Timer}) ->
-    _ = rafter_timer:cancel_timer(Timer),
-    NewTimer = rafter_timer:send_event_after(self(), Duration, timeout),
-    State#state{timer=NewTimer}.
+reset_timer(Duration, State=#state{me=Me}) ->
+    rafter_timer_fsm:cancel_timer(Me),
+    rafter_timer_fsm:send_event_after(Me, self(), Duration, timeout),
+    State.
 
 %%=============================================================================
 %% Tests
